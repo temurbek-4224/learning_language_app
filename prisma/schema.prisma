@@ -136,7 +136,7 @@ model DeckWord {
   deckId      String
   term        String
   translation String
-  definition  String
+  definition  String?
   example     String?
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
@@ -323,6 +323,9 @@ model AiUsageLog {
   studentId   String?
   provider    String
   feature     String
+  promptType  String?
+  success     Boolean?
+  errorCode   String?
   promptTokens Int?
   outputTokens Int?
   costCents   Int?

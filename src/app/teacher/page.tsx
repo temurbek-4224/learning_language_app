@@ -36,8 +36,9 @@ const cards = [
 export default async function TeacherPage() {
   const teacher = await requireRole(UserRole.TEACHER, "/teacher/login");
 
-  const [classes, students] = await Promise.all([
+  const [classes, decks, students] = await Promise.all([
     prisma.classRoom.count({ where: { teacherId: teacher.id } }),
+    prisma.deck.count({ where: { teacherId: teacher.id } }),
     prisma.classMember.count({
       where: {
         classRoom: {
@@ -49,7 +50,7 @@ export default async function TeacherPage() {
 
   const values = {
     classes,
-    decks: "Later",
+    decks,
     assignments: "Later",
     students,
   };
