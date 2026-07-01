@@ -5,15 +5,18 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-semibold shadow-sm transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-slate-950 text-white hover:bg-slate-800",
-        secondary: "bg-slate-100 text-slate-950 hover:bg-slate-200",
+        default:
+          "bg-gradient-to-r from-indigo-600 to-blue-600 text-white hover:from-indigo-500 hover:to-blue-500",
+        secondary: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
         outline:
-          "border border-slate-200 bg-white text-slate-950 hover:bg-slate-50",
-        ghost: "text-slate-700 hover:bg-slate-100 hover:text-slate-950",
+          "border border-slate-200 bg-white text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700",
+        ghost: "text-slate-600 shadow-none hover:bg-slate-100 hover:text-slate-950",
+        danger:
+          "border border-rose-200 bg-white text-rose-700 hover:bg-rose-50",
       },
       size: {
         default: "h-10 px-4 py-2",

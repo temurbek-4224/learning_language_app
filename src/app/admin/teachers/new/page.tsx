@@ -1,5 +1,8 @@
+import Link from "next/link";
 import { UserRole } from "@prisma/client";
+import { ArrowLeft } from "lucide-react";
 
+import { PageHeader } from "@/components/dashboard/page-header";
 import { Button } from "@/components/ui/button";
 import { requireRole } from "@/lib/auth";
 
@@ -18,62 +21,75 @@ export default async function NewTeacherPage({
   const params = await searchParams;
 
   return (
-    <section className="mx-auto max-w-xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Create Teacher</h1>
-        <p className="text-sm text-slate-600">
-          Create a teacher account with a temporary password.
-        </p>
-      </div>
+    <section className="mx-auto max-w-3xl space-y-6">
+      <PageHeader
+        eyebrow="New account"
+        title="Create Teacher"
+        description="Set up a teacher account with a temporary password. The password is hashed before it is stored."
+        action={
+          <Button asChild variant="outline">
+            <Link href="/admin/teachers">
+              <ArrowLeft />
+              Back
+            </Link>
+          </Button>
+        }
+      />
 
       {params?.error ? (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
           {params.error}
         </div>
       ) : null}
 
       <form
         action={createTeacherAction}
-        className="space-y-4 rounded-lg border border-slate-200 bg-white p-6"
+        className="space-y-5 rounded-3xl border border-white/80 bg-white p-6 shadow-xl shadow-slate-200/70"
       >
         <label className="block space-y-2">
-          <span className="text-sm font-medium">Full name</span>
+          <span className="text-sm font-bold text-slate-700">Full name</span>
           <input
             name="fullName"
-            className="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-slate-950"
+            className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none ring-indigo-100 transition focus:border-indigo-400 focus:bg-white focus:ring-4"
             required
           />
         </label>
         <label className="block space-y-2">
-          <span className="text-sm font-medium">Login</span>
+          <span className="text-sm font-bold text-slate-700">Login</span>
           <input
             name="login"
-            className="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-slate-950"
+            className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none ring-indigo-100 transition focus:border-indigo-400 focus:bg-white focus:ring-4"
             required
           />
         </label>
         <label className="block space-y-2">
-          <span className="text-sm font-medium">Temporary password</span>
+          <span className="text-sm font-bold text-slate-700">
+            Temporary password
+          </span>
           <input
             name="password"
             type="password"
             minLength={8}
-            className="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-slate-950"
+            className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none ring-indigo-100 transition focus:border-indigo-400 focus:bg-white focus:ring-4"
             required
           />
         </label>
         <label className="block space-y-2">
-          <span className="text-sm font-medium">Status</span>
+          <span className="text-sm font-bold text-slate-700">Status</span>
           <select
             name="status"
-            className="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-slate-950"
+            className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none ring-indigo-100 transition focus:border-indigo-400 focus:bg-white focus:ring-4"
             defaultValue="ACTIVE"
           >
             <option value="ACTIVE">ACTIVE</option>
             <option value="INACTIVE">INACTIVE</option>
           </select>
         </label>
-        <Button type="submit">Create Teacher</Button>
+        <div className="pt-2">
+          <Button type="submit" size="lg">
+            Create Teacher
+          </Button>
+        </div>
       </form>
     </section>
   );

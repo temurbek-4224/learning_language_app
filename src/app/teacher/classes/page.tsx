@@ -1,5 +1,8 @@
 import { UserRole } from "@prisma/client";
+import { Link2, Plus, School } from "lucide-react";
 
+import { EmptyState } from "@/components/dashboard/empty-state";
+import { PageHeader } from "@/components/dashboard/page-header";
 import { Button } from "@/components/ui/button";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -52,93 +55,118 @@ export default async function TeacherClassesPage({
 
   return (
     <section className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Classes</h1>
-        <p className="text-sm text-zinc-600">
-          Create classes and share Telegram invite links with students.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Classroom setup"
+        title="Classes"
+        description="Create a class, get a Telegram invite link, and keep student access organized by teacher."
+      />
 
       {params?.error ? (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
           {params.error}
         </div>
       ) : null}
 
       {!process.env.TELEGRAM_BOT_USERNAME ? (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
           TELEGRAM_BOT_USERNAME is missing. Invite links will show as placeholders.
         </div>
       ) : null}
 
       <form
         action={createClassAction}
-        className="grid gap-4 rounded-lg border border-zinc-200 bg-white p-5 md:grid-cols-[1fr_1fr_auto]"
+        className="grid gap-4 rounded-3xl border border-white/80 bg-white p-6 shadow-xl shadow-slate-200/70 md:grid-cols-[1fr_1fr_auto]"
       >
         <label className="block space-y-2">
-          <span className="text-sm font-medium">Title</span>
+          <span className="text-sm font-bold text-slate-700">Title</span>
           <input
             name="title"
-            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-zinc-950"
+            className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none ring-indigo-100 transition focus:border-indigo-400 focus:bg-white focus:ring-4"
             required
           />
         </label>
         <label className="block space-y-2">
-          <span className="text-sm font-medium">Description</span>
+          <span className="text-sm font-bold text-slate-700">Description</span>
           <input
             name="description"
-            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-zinc-950"
+            className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none ring-indigo-100 transition focus:border-indigo-400 focus:bg-white focus:ring-4"
           />
         </label>
         <div className="flex items-end">
-          <Button type="submit">Create Class</Button>
+          <Button type="submit" size="lg">
+            <Plus />
+            Create Class
+          </Button>
         </div>
       </form>
 
-      <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-zinc-50 text-zinc-600">
-            <tr>
-              <th className="px-4 py-3 font-medium">Title</th>
-              <th className="px-4 py-3 font-medium">Students</th>
-              <th className="px-4 py-3 font-medium">Invite link</th>
-              <th className="px-4 py-3 font-medium">Created</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-200">
-            {classes.map((classRoom) => {
-              const inviteLink = getInviteLink(classRoom.inviteCode);
+      {classes.length === 0 ? (
+        <EmptyState
+          title="No classes yet"
+          description="Create your first class to generate an invite link students can use from Telegram later."
+        />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {classes.map((classRoom) => {
+            const inviteLink = getInviteLink(classRoom.inviteCode);
+            const displayLink =
+              inviteLink ?? `t.me/<bot>?start=class_${classRoom.inviteCode}`;
 
-              return (
-                <tr key={classRoom.id}>
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{classRoom.title}</div>
-                    {classRoom.description ? (
-                      <div className="text-xs text-zinc-500">
-                        {classRoom.description}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-3">{classRoom._count.members}</td>
-                  <td className="px-4 py-3 text-zinc-600">
-                    {inviteLink ?? `t.me/<bot>?start=class_${classRoom.inviteCode}`}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-600">
-                    {formatDate(classRoom.createdAt)}
-                  </td>
-                </tr>
-              );
-            })}
-            {classes.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-zinc-600">
-                  No classes yet.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+            return (
+              <article
+                key={classRoom.id}
+                className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-100"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex gap-3">
+                    <div className="rounded-2xl bg-indigo-50 p-3 text-indigo-600 ring-1 ring-indigo-100">
+                      <School className="size-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-950">
+                        {classRoom.title}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {classRoom.description || "No description added"}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200">
+                    {classRoom.isActive ? "ACTIVE" : "INACTIVE"}
+                  </span>
+                </div>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                      Students
+                    </p>
+                    <p className="mt-1 text-2xl font-bold text-slate-950">
+                      {classRoom._count.members}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                      Created
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-700">
+                      {formatDate(classRoom.createdAt)}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-indigo-700">
+                    <Link2 className="size-4" />
+                    Invite link
+                  </div>
+                  <p className="break-all rounded-xl bg-white px-3 py-2 font-mono text-xs text-slate-700 ring-1 ring-indigo-100">
+                    {displayLink}
+                  </p>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }

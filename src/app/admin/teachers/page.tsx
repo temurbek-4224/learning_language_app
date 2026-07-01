@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { UserRole } from "@prisma/client";
+import { Plus, ShieldCheck } from "lucide-react";
 
+import { EmptyState } from "@/components/dashboard/empty-state";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { StatusBadge } from "@/components/dashboard/status-badge";
 import { Button } from "@/components/ui/button";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -44,81 +48,111 @@ export default async function AdminTeachersPage({
 
   return (
     <section className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Teachers</h1>
-          <p className="text-sm text-slate-600">
-            Create teachers and reset temporary passwords.
-          </p>
-        </div>
-        <Button asChild>
-          <Link href="/admin/teachers/new">Create Teacher</Link>
-        </Button>
-      </div>
+      <PageHeader
+        eyebrow="Access control"
+        title="Teachers"
+        description="Create teacher accounts, review their class ownership, and reset temporary passwords without exposing credentials."
+        action={
+          <Button asChild size="lg">
+            <Link href="/admin/teachers/new">
+              <Plus />
+              Create Teacher
+            </Link>
+          </Button>
+        }
+      />
 
       {params?.error ? (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
           {params.error}
         </div>
       ) : null}
       {params?.success ? (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
           {params.success}
         </div>
       ) : null}
 
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 text-slate-600">
-            <tr>
-              <th className="px-4 py-3 font-medium">Full name</th>
-              <th className="px-4 py-3 font-medium">Login</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Classes</th>
-              <th className="px-4 py-3 font-medium">Created</th>
-              <th className="px-4 py-3 font-medium">Reset password</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200">
-            {teachers.map((teacher) => (
-              <tr key={teacher.id}>
-                <td className="px-4 py-3 font-medium">{teacher.fullName}</td>
-                <td className="px-4 py-3 text-slate-600">{teacher.login}</td>
-                <td className="px-4 py-3">{teacher.status}</td>
-                <td className="px-4 py-3">{teacher._count.classes}</td>
-                <td className="px-4 py-3 text-slate-600">
-                  {formatDate(teacher.createdAt)}
-                </td>
-                <td className="px-4 py-3">
-                  <form
-                    action={resetTeacherPasswordAction}
-                    className="flex gap-2"
-                  >
-                    <input type="hidden" name="teacherId" value={teacher.id} />
-                    <input
-                      name="password"
-                      type="password"
-                      placeholder="New temp password"
-                      className="h-9 w-44 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-slate-950"
-                      required
-                    />
-                    <Button type="submit" variant="outline" size="sm">
-                      Save
-                    </Button>
-                  </form>
-                </td>
-              </tr>
-            ))}
-            {teachers.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-600">
-                  No teachers yet.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+      {teachers.length === 0 ? (
+        <EmptyState
+          title="No teachers yet"
+          description="Create the first teacher account so they can start building classes."
+          action={
+            <Button asChild>
+              <Link href="/admin/teachers/new">Create Teacher</Link>
+            </Button>
+          }
+        />
+      ) : (
+        <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-200/70">
+          <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
+            <div className="rounded-2xl bg-indigo-50 p-2 text-indigo-600">
+              <ShieldCheck className="size-5" />
+            </div>
+            <div>
+              <h2 className="font-bold text-slate-950">Teacher accounts</h2>
+              <p className="text-sm text-slate-500">
+                {teachers.length} account{teachers.length === 1 ? "" : "s"} found
+              </p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left text-sm">
+              <thead className="bg-slate-50/80 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-5 py-3 font-bold">Full name</th>
+                  <th className="px-5 py-3 font-bold">Login</th>
+                  <th className="px-5 py-3 font-bold">Status</th>
+                  <th className="px-5 py-3 font-bold">Classes</th>
+                  <th className="px-5 py-3 font-bold">Created</th>
+                  <th className="px-5 py-3 font-bold">Reset password</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {teachers.map((teacher) => (
+                  <tr key={teacher.id} className="hover:bg-indigo-50/30">
+                    <td className="px-5 py-4">
+                      <div className="font-bold text-slate-950">
+                        {teacher.fullName}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4 text-slate-600">{teacher.login}</td>
+                    <td className="px-5 py-4">
+                      <StatusBadge status={teacher.status} />
+                    </td>
+                    <td className="px-5 py-4">
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
+                        {teacher._count.classes}
+                      </span>
+                    </td>
+                    <td className="px-5 py-4 text-slate-600">
+                      {formatDate(teacher.createdAt)}
+                    </td>
+                    <td className="px-5 py-4">
+                      <form
+                        action={resetTeacherPasswordAction}
+                        className="flex gap-2"
+                      >
+                        <input type="hidden" name="teacherId" value={teacher.id} />
+                        <input
+                          name="password"
+                          type="password"
+                          placeholder="New temp password"
+                          className="h-10 w-48 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none ring-indigo-100 transition focus:border-indigo-400 focus:bg-white focus:ring-4"
+                          required
+                        />
+                        <Button type="submit" variant="outline" size="sm">
+                          Save
+                        </Button>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
