@@ -9,12 +9,15 @@ datasource db {
 
 enum UserRole {
   ADMIN
+  SUPER_ADMIN
   TEACHER
 }
 
 enum UserStatus {
   INVITED
   ACTIVE
+  INACTIVE
+  BLOCKED
   SUSPENDED
 }
 
@@ -38,11 +41,11 @@ enum ActivityType {
 
 model WebUser {
   id           String     @id @default(cuid())
-  email        String     @unique
-  name         String
+  login        String     @unique @map("email")
+  fullName     String     @map("name")
   passwordHash String?
   role         UserRole
-  status       UserStatus @default(INVITED)
+  status       UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -82,9 +85,10 @@ model Student {
 model ClassRoom {
   id          String   @id @default(cuid())
   teacherId   String
-  name        String
+  title       String   @map("name")
   description String?
   inviteCode  String   @unique
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -95,7 +99,7 @@ model ClassRoom {
 
   @@index([teacherId])
   @@index([inviteCode])
-  @@unique([teacherId, name])
+  @@unique([teacherId, title])
 }
 
 model ClassMember {

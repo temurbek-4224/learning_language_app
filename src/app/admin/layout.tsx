@@ -1,5 +1,8 @@
 import Link from "next/link";
 
+import { logoutAction } from "@/app/actions";
+import { Button } from "@/components/ui/button";
+
 const navItems = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/teachers", label: "Teachers" },
@@ -24,6 +27,11 @@ export default function AdminLayout({
               </Link>
             ))}
           </nav>
+          <form action={logoutAction}>
+            <Button type="submit" variant="outline" size="sm">
+              Logout
+            </Button>
+          </form>
         </div>
       </header>
       <main className="mx-auto w-full max-w-6xl px-6 py-8">{children}</main>
