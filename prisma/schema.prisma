@@ -1,0 +1,359 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  TEACHER
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+
+enum LessonStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum AssignmentStatus {
+  DRAFT
+  ASSIGNED
+  ARCHIVED
+}
+
+enum ActivityType {
+  STUDY_CARDS
+  TRANSLATION_QUIZ
+  DEFINITION_TYPING
+}
+
+model WebUser {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  name         String
+  passwordHash String?
+  role         UserRole
+  status       UserStatus @default(INVITED)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  classes              ClassRoom[]
+  decks                Deck[]
+  assignmentTemplates  AssignmentTemplate[]
+  classAssignments     ClassAssignment[]
+  aiUsageLogs          AiUsageLog[]
+  notificationLogs     NotificationLog[]
+  createdTeacherInvites WebUser[] @relation("TeacherCreatedBy")
+  createdBy            WebUser?   @relation("TeacherCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById          String?
+
+  @@index([role])
+  @@index([status])
+  @@index([createdById])
+}
+
+model Student {
+  id             String   @id @default(cuid())
+  telegramUserId String   @unique
+  username       String?
+  firstName      String?
+  lastName       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  memberships     ClassMember[]
+  lessonProgress  StudentLessonProgress[]
+  answerLogs      StudentAnswerLog[]
+  aiUsageLogs     AiUsageLog[]
+  notificationLogs NotificationLog[]
+
+  @@index([telegramUserId])
+}
+
+model ClassRoom {
+  id          String   @id @default(cuid())
+  teacherId   String
+  name        String
+  description String?
+  inviteCode  String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  teacher     WebUser           @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  members     ClassMember[]
+  assignments ClassAssignment[]
+  notificationLogs NotificationLog[]
+
+  @@index([teacherId])
+  @@index([inviteCode])
+  @@unique([teacherId, name])
+}
+
+model ClassMember {
+  id        String   @id @default(cuid())
+  classId   String
+  studentId String
+  joinedAt  DateTime @default(now())
+
+  classRoom ClassRoom @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([classId, studentId])
+  @@index([classId])
+  @@index([studentId])
+}
+
+model Deck {
+  id          String   @id @default(cuid())
+  teacherId   String
+  title       String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  teacher WebUser    @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  words   DeckWord[]
+
+  @@index([teacherId])
+  @@unique([teacherId, title])
+}
+
+model DeckWord {
+  id          String   @id @default(cuid())
+  deckId      String
+  term        String
+  translation String
+  definition  String
+  example     String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deck                Deck                 @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  templateLessonWords TemplateLessonWord[]
+  classLessonWords    ClassLessonWord[]
+
+  @@index([deckId])
+  @@unique([deckId, term, translation])
+}
+
+model AssignmentTemplate {
+  id          String           @id @default(cuid())
+  teacherId   String
+  title       String
+  description String?
+  status      AssignmentStatus @default(DRAFT)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  teacher          WebUser           @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  lessons          TemplateLesson[]
+  classAssignments ClassAssignment[]
+
+  @@index([teacherId])
+  @@index([status])
+  @@unique([teacherId, title])
+}
+
+model TemplateLesson {
+  id         String       @id @default(cuid())
+  templateId String
+  title      String
+  activity   ActivityType
+  sortOrder  Int
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  template AssignmentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  words    TemplateLessonWord[]
+  classLessons ClassLesson[]
+
+  @@index([templateId])
+  @@unique([templateId, sortOrder])
+}
+
+model TemplateLessonWord {
+  id               String   @id @default(cuid())
+  templateLessonId String
+  deckWordId        String?
+  term             String
+  translation      String
+  definition       String
+  example          String?
+  sortOrder        Int
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  templateLesson TemplateLesson @relation(fields: [templateLessonId], references: [id], onDelete: Cascade)
+  deckWord       DeckWord?       @relation(fields: [deckWordId], references: [id], onDelete: SetNull)
+  classLessonWords ClassLessonWord[]
+
+  @@index([templateLessonId])
+  @@index([deckWordId])
+  @@unique([templateLessonId, sortOrder])
+}
+
+model ClassAssignment {
+  id         String           @id @default(cuid())
+  classId    String
+  templateId String
+  teacherId  String
+  title      String
+  status     AssignmentStatus @default(ASSIGNED)
+  assignedAt DateTime         @default(now())
+  dueAt      DateTime?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  classRoom ClassRoom          @relation(fields: [classId], references: [id], onDelete: Cascade)
+  template  AssignmentTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  teacher   WebUser            @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  lessons   ClassLesson[]
+  notificationLogs NotificationLog[]
+
+  @@index([classId])
+  @@index([templateId])
+  @@index([teacherId])
+  @@index([status])
+}
+
+model ClassLesson {
+  id                 String       @id @default(cuid())
+  classAssignmentId  String
+  templateLessonId   String?
+  title              String
+  activity           ActivityType
+  sortOrder          Int
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  assignment     ClassAssignment @relation(fields: [classAssignmentId], references: [id], onDelete: Cascade)
+  templateLesson TemplateLesson?  @relation(fields: [templateLessonId], references: [id], onDelete: SetNull)
+  words          ClassLessonWord[]
+  progress       StudentLessonProgress[]
+
+  @@index([classAssignmentId])
+  @@index([templateLessonId])
+  @@unique([classAssignmentId, sortOrder])
+}
+
+model ClassLessonWord {
+  id                   String   @id @default(cuid())
+  classLessonId         String
+  templateLessonWordId  String?
+  deckWordId            String?
+  term                 String
+  translation          String
+  definition           String
+  example              String?
+  sortOrder            Int
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  classLesson        ClassLesson         @relation(fields: [classLessonId], references: [id], onDelete: Cascade)
+  templateLessonWord TemplateLessonWord? @relation(fields: [templateLessonWordId], references: [id], onDelete: SetNull)
+  deckWord           DeckWord?           @relation(fields: [deckWordId], references: [id], onDelete: SetNull)
+  answerLogs         StudentAnswerLog[]
+
+  @@index([classLessonId])
+  @@index([templateLessonWordId])
+  @@index([deckWordId])
+  @@unique([classLessonId, sortOrder])
+}
+
+model StudentLessonProgress {
+  id             String       @id @default(cuid())
+  studentId      String
+  classLessonId  String
+  status         LessonStatus @default(NOT_STARTED)
+  score          Int?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  student     Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  classLesson ClassLesson        @relation(fields: [classLessonId], references: [id], onDelete: Cascade)
+  answerLogs  StudentAnswerLog[]
+
+  @@unique([studentId, classLessonId])
+  @@index([studentId])
+  @@index([classLessonId])
+  @@index([status])
+}
+
+model StudentAnswerLog {
+  id             String       @id @default(cuid())
+  studentId      String
+  progressId     String
+  classLessonWordId String?
+  activity       ActivityType
+  prompt         String
+  expectedAnswer String
+  submittedAnswer String?
+  isCorrect      Boolean
+  answeredAt     DateTime     @default(now())
+
+  student         Student               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  progress        StudentLessonProgress @relation(fields: [progressId], references: [id], onDelete: Cascade)
+  classLessonWord ClassLessonWord?      @relation(fields: [classLessonWordId], references: [id], onDelete: SetNull)
+
+  @@index([studentId])
+  @@index([progressId])
+  @@index([classLessonWordId])
+  @@index([activity])
+}
+
+model AiUsageLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  studentId   String?
+  provider    String
+  feature     String
+  promptTokens Int?
+  outputTokens Int?
+  costCents   Int?
+  createdAt   DateTime @default(now())
+
+  user    WebUser? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([studentId])
+  @@index([feature])
+  @@index([createdAt])
+}
+
+model NotificationLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  studentId   String?
+  classId     String?
+  assignmentId String?
+  channel     String
+  event       String
+  status      String
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  user       WebUser?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  student    Student?         @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  classRoom  ClassRoom?       @relation(fields: [classId], references: [id], onDelete: SetNull)
+  assignment ClassAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([studentId])
+  @@index([classId])
+  @@index([assignmentId])
+  @@index([event])
+  @@index([status])
+}
