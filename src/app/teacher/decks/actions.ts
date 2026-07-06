@@ -141,16 +141,27 @@ export async function createWordAction(deckId: string, formData: FormData) {
 
   const sortOrder = await prisma.deckWord.count({ where: { deckId } });
 
-  await prisma.deckWord.create({
-    data: {
-      deckId,
-      term: english,
-      translation,
-      definition,
-      example,
-      sortOrder,
-    },
-  });
+  try {
+    await prisma.deckWord.create({
+      data: {
+        deckId,
+        term: english,
+        translation,
+        definition,
+        example,
+        sortOrder,
+      },
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      redirectWithError(path, "This English word already exists in this deck.");
+    }
+
+    throw error;
+  }
 
   revalidatePath(path);
   redirect(path);
@@ -175,15 +186,26 @@ export async function updateWordAction(wordId: string, formData: FormData) {
     redirectWithError(path, "This English word already exists in this deck.");
   }
 
-  await prisma.deckWord.update({
-    where: { id: word.id },
-    data: {
-      term: english,
-      translation,
-      definition,
-      example,
-    },
-  });
+  try {
+    await prisma.deckWord.update({
+      where: { id: word.id },
+      data: {
+        term: english,
+        translation,
+        definition,
+        example,
+      },
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      redirectWithError(path, "This English word already exists in this deck.");
+    }
+
+    throw error;
+  }
 
   revalidatePath(path);
   redirect(path);
@@ -261,17 +283,29 @@ export async function importWordsAction(deckId: string, formData: FormData) {
       continue;
     }
 
-    await prisma.deckWord.create({
-      data: {
-        deckId,
-        term: parsed.english,
-        translation: parsed.translation,
-        definition: null,
-        example: null,
-        sortOrder: await prisma.deckWord.count({ where: { deckId } }),
-      },
-    });
-    imported += 1;
+    try {
+      await prisma.deckWord.create({
+        data: {
+          deckId,
+          term: parsed.english,
+          translation: parsed.translation,
+          definition: null,
+          example: null,
+          sortOrder: await prisma.deckWord.count({ where: { deckId } }),
+        },
+      });
+      imported += 1;
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        duplicate += 1;
+        continue;
+      }
+
+      throw error;
+    }
   }
 
   revalidatePath(path);

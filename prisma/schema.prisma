@@ -147,7 +147,7 @@ model DeckWord {
   classLessonWords    ClassLessonWord[]
 
   @@index([deckId])
-  @@unique([deckId, term, translation])
+  @@unique([deckId, term])
 }
 
 model AssignmentTemplate {
