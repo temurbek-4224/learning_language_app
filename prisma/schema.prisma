@@ -126,6 +126,7 @@ model Deck {
 
   teacher WebUser    @relation(fields: [teacherId], references: [id], onDelete: Cascade)
   words   DeckWord[]
+  assignmentTemplates AssignmentTemplate[]
 
   @@index([teacherId])
   @@unique([teacherId, title])
@@ -153,17 +154,21 @@ model DeckWord {
 model AssignmentTemplate {
   id          String           @id @default(cuid())
   teacherId   String
+  sourceDeckId String?
   title       String
   description String?
+  wordsPerLesson Int          @default(10)
   status      AssignmentStatus @default(DRAFT)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
   teacher          WebUser           @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  sourceDeck       Deck?             @relation(fields: [sourceDeckId], references: [id], onDelete: SetNull)
   lessons          TemplateLesson[]
   classAssignments ClassAssignment[]
 
   @@index([teacherId])
+  @@index([sourceDeckId])
   @@index([status])
   @@unique([teacherId, title])
 }

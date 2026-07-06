@@ -18,6 +18,42 @@ type AiDetailsResult =
       error: string;
     };
 
+type BulkAiMode = "SELECTED" | "MISSING_AI";
+
+type BulkAiResult = {
+  ok: boolean;
+  total: number;
+  success: number;
+  failed: number;
+  skipped: number;
+  totalRequested: number;
+  successCount: number;
+  failedCount: number;
+  skippedCount: number;
+  failedWords: Array<{
+    id: string;
+    english: string;
+    errorCode: string;
+  }>;
+  error?: string;
+};
+
+type GeminiWordDetailsResult =
+  | {
+      ok: true;
+      definition: string;
+      example: string;
+    }
+  | {
+      ok: false;
+      error: string;
+      errorCode: string;
+    };
+
+const BULK_AI_DELAY_MS = 2000;
+const GEMINI_RATE_LIMIT_DELAY_MS = 15000;
+const GEMINI_MAX_RETRIES = 1;
+
 function redirectWithError(path: string, error: string) {
   redirect(`${path}?error=${encodeURIComponent(error)}`);
 }
@@ -25,6 +61,12 @@ function redirectWithError(path: string, error: string) {
 function cleanOptional(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
   return text || null;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 async function requireOwnedDeck(deckId: string) {
@@ -341,39 +383,33 @@ async function logAiUsage(
   teacherId: string,
   success: boolean,
   errorCode?: string,
+  feature = "WORD_DETAILS",
+  promptType = "DECK_WORD",
 ) {
   await prisma.aiUsageLog.create({
     data: {
       userId: teacherId,
       provider: "GEMINI",
-      feature: "WORD_DETAILS",
-      promptType: "DECK_WORD",
+      feature,
+      promptType,
       success,
       errorCode,
     },
   });
 }
 
-export async function generateWordDetailsAction(input: {
-  english: string;
-  translation: string;
-}): Promise<AiDetailsResult> {
-  const teacher = await requireRole(UserRole.TEACHER, "/teacher/login");
-  const english = input.english.trim();
-  const translation = input.translation.trim();
-
-  if (!english || !translation) {
-    return {
-      ok: false,
-      error: "English and translation are required before using AI.",
-    };
-  }
-
+async function requestGeminiWordDetails(
+  english: string,
+  translation: string,
+): Promise<GeminiWordDetailsResult> {
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
-    await logAiUsage(teacher.id, false, "MISSING_API_KEY");
-    return { ok: false, error: "Gemini API key is not configured." };
+    return {
+      ok: false as const,
+      error: "Gemini API key is not configured.",
+      errorCode: "MISSING_API_KEY",
+    };
   }
 
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
@@ -408,8 +444,26 @@ The example must include the exact English word "${english}".`;
     );
 
     if (!response.ok) {
-      await logAiUsage(teacher.id, false, `HTTP_${response.status}`);
-      return { ok: false, error: "AI generation failed. Please try again." };
+      console.warn("Gemini word details request failed", {
+        GEMINI_MODEL: model,
+        status: response.status,
+        errorCode: `HTTP_${response.status}`,
+        message: response.statusText || "Gemini request failed",
+      });
+
+      if (response.status === 429) {
+        return {
+          ok: false as const,
+          error: "Gemini limiti vaqtincha to'ldi. Biroz kutib qayta urinib ko'ring.",
+          errorCode: "HTTP_429",
+        };
+      }
+
+      return {
+        ok: false as const,
+        error: "AI generation failed. Please try again.",
+        errorCode: `HTTP_${response.status}`,
+      };
     }
 
     const data = (await response.json()) as {
@@ -424,24 +478,233 @@ The example must include the exact English word "${english}".`;
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!text) {
-      await logAiUsage(teacher.id, false, "EMPTY_RESPONSE");
-      return { ok: false, error: "AI returned an empty response." };
+      return {
+        ok: false as const,
+        error: "AI returned an empty response.",
+        errorCode: "EMPTY_RESPONSE",
+      };
     }
 
     const details = parseGeminiJson(text);
 
     if (!details.example.includes(english)) {
-      await logAiUsage(teacher.id, false, "EXAMPLE_MISSING_WORD");
       return {
-        ok: false,
+        ok: false as const,
         error: "AI example did not include the English word. Please try again.",
+        errorCode: "EXAMPLE_MISSING_WORD",
       };
     }
 
-    await logAiUsage(teacher.id, true);
     return { ok: true, ...details };
   } catch {
-    await logAiUsage(teacher.id, false, "REQUEST_FAILED");
-    return { ok: false, error: "AI generation failed. Please try again." };
+    return {
+      ok: false as const,
+      error: "AI generation failed. Please try again.",
+      errorCode: "REQUEST_FAILED",
+    };
   }
+}
+
+async function generateWithRetry(word: {
+  term: string;
+  translation: string;
+}) {
+  let lastResult: GeminiWordDetailsResult | null = null;
+
+  for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES; attempt += 1) {
+    const result = await requestGeminiWordDetails(
+      word.term.trim(),
+      word.translation.trim(),
+    );
+
+    if (result.ok) {
+      return result;
+    }
+
+    lastResult = result;
+
+    if (result.errorCode !== "HTTP_429" || attempt >= GEMINI_MAX_RETRIES) {
+      return result;
+    }
+
+    console.warn("Gemini rate limit hit during bulk word details; retrying", {
+      GEMINI_MODEL: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      errorCode: result.errorCode,
+      message: result.error,
+      retryDelayMs: GEMINI_RATE_LIMIT_DELAY_MS,
+      attempt: attempt + 1,
+    });
+    await sleep(GEMINI_RATE_LIMIT_DELAY_MS);
+  }
+
+  return (
+    lastResult ?? {
+      ok: false as const,
+      error: "AI generation failed. Please try again.",
+      errorCode: "REQUEST_FAILED",
+    }
+  );
+}
+
+export async function generateWordDetailsAction(input: {
+  english: string;
+  translation: string;
+}): Promise<AiDetailsResult> {
+  const teacher = await requireRole(UserRole.TEACHER, "/teacher/login");
+  const english = input.english.trim();
+  const translation = input.translation.trim();
+
+  if (!english || !translation) {
+    return {
+      ok: false,
+      error: "English and translation are required before using AI.",
+    };
+  }
+
+  const result = await requestGeminiWordDetails(english, translation);
+
+  if (!result.ok) {
+    await logAiUsage(teacher.id, false, result.errorCode);
+    return { ok: false, error: result.error };
+  }
+
+  await logAiUsage(teacher.id, true);
+  return {
+    ok: true,
+    definition: result.definition,
+    example: result.example,
+  };
+}
+
+export async function generateBulkWordDetailsAction(input: {
+  deckId: string;
+  mode: BulkAiMode;
+  wordIds?: string[];
+}): Promise<BulkAiResult> {
+  const { teacher } = await requireOwnedDeck(input.deckId);
+  const uniqueWordIds = Array.from(new Set(input.wordIds ?? []));
+
+  if (input.mode === "SELECTED" && uniqueWordIds.length === 0) {
+    return {
+      ok: false,
+      total: 0,
+      success: 0,
+      failed: 0,
+      skipped: 0,
+      totalRequested: 0,
+      successCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      failedWords: [],
+      error: "Select at least one word.",
+    };
+  }
+
+  const words = await prisma.deckWord.findMany({
+    where: {
+      deckId: input.deckId,
+      ...(input.mode === "SELECTED" ? { id: { in: uniqueWordIds } } : {}),
+      ...(input.mode === "MISSING_AI"
+        ? {
+            OR: [{ definition: null }, { definition: "" }, { example: null }, { example: "" }],
+          }
+        : {}),
+    },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    select: {
+      id: true,
+      term: true,
+      translation: true,
+      definition: true,
+      example: true,
+    },
+  });
+
+  let successCount = 0;
+  let failedCount = 0;
+  let skippedCount = 0;
+  let requestCount = 0;
+  const failedWords: BulkAiResult["failedWords"] = [];
+
+  for (const word of words) {
+    const hasDefinition = Boolean(word.definition?.trim());
+    const hasExample = Boolean(word.example?.trim());
+
+    if (hasDefinition && hasExample) {
+      skippedCount += 1;
+      continue;
+    }
+
+    if (!word.term.trim() || !word.translation.trim()) {
+      failedCount += 1;
+      failedWords.push({
+        id: word.id,
+        english: word.term,
+        errorCode: "MISSING_WORD_INPUT",
+      });
+      await logAiUsage(
+        teacher.id,
+        false,
+        "MISSING_WORD_INPUT",
+        "BULK_WORD_DETAILS",
+        "DECK_WORD_BULK",
+      );
+      continue;
+    }
+
+    if (requestCount > 0) {
+      await sleep(BULK_AI_DELAY_MS);
+    }
+
+    requestCount += 1;
+    const result = await generateWithRetry(word);
+
+    if (!result.ok) {
+      failedCount += 1;
+      failedWords.push({
+        id: word.id,
+        english: word.term,
+        errorCode: result.errorCode,
+      });
+      await logAiUsage(
+        teacher.id,
+        false,
+        result.errorCode,
+        "BULK_WORD_DETAILS",
+        "DECK_WORD_BULK",
+      );
+      continue;
+    }
+
+    await prisma.deckWord.update({
+      where: { id: word.id },
+      data: {
+        definition: hasDefinition ? word.definition : result.definition,
+        example: hasExample ? word.example : result.example,
+      },
+    });
+    successCount += 1;
+    await logAiUsage(
+      teacher.id,
+      true,
+      undefined,
+      "BULK_WORD_DETAILS",
+      "DECK_WORD_BULK",
+    );
+  }
+
+  revalidatePath(`/teacher/decks/${input.deckId}`);
+
+  return {
+    ok: failedCount === 0,
+    total: words.length,
+    success: successCount,
+    failed: failedCount,
+    skipped: skippedCount,
+    totalRequested: words.length,
+    successCount,
+    failedCount,
+    skippedCount,
+    failedWords,
+  };
 }

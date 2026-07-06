@@ -1,4 +1,5 @@
 import { UserRole } from "@prisma/client";
+import Link from "next/link";
 import { Link2, Plus, School } from "lucide-react";
 
 import { EmptyState } from "@/components/dashboard/empty-state";
@@ -48,7 +49,7 @@ export default async function TeacherClassesPage({
       isActive: true,
       createdAt: true,
       _count: {
-        select: { members: true },
+        select: { members: true, assignments: true },
       },
     },
   });
@@ -146,12 +147,27 @@ export default async function TeacherClassesPage({
                   </div>
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                      Assignments
+                    </p>
+                    <p className="mt-1 text-2xl font-bold text-slate-950">
+                      {classRoom._count.assignments}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
                       Created
                     </p>
                     <p className="mt-1 text-sm font-semibold text-slate-700">
                       {formatDate(classRoom.createdAt)}
                     </p>
                   </div>
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/teacher/classes/${classRoom.id}`}>
+                      View class
+                    </Link>
+                  </Button>
                 </div>
                 <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4">
                   <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-indigo-700">

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import {
   ArrowLeft,
@@ -23,6 +24,7 @@ import { cn } from "@/lib/utils";
 import {
   createWordAction,
   deleteWordAction,
+  generateBulkWordDetailsAction,
   generateWordDetailsAction,
   importWordsAction,
   updateWordAction,
@@ -74,6 +76,26 @@ type WordModalState =
     };
 
 type AiFilter = "all" | "complete" | "missing";
+type BulkAiMode = "SELECTED" | "MISSING_AI";
+
+type BulkResult = {
+  totalRequested: number;
+  successCount: number;
+  failedCount: number;
+  skippedCount: number;
+  failedWords: Array<{
+    id: string;
+    english: string;
+    errorCode: string;
+  }>;
+  error?: string;
+};
+
+type BulkConfirmState = {
+  mode: BulkAiMode;
+  count: number;
+  wordIds?: string[];
+};
 
 const emptyDraft: WordDraft = {
   english: "",
@@ -118,12 +140,17 @@ export function DeckDetailClient({
   error,
   importResult,
 }: DeckDetailClientProps) {
+  const router = useRouter();
   const [modal, setModal] = useState<WordModalState | null>(null);
   const [draft, setDraft] = useState<WordDraft>(emptyDraft);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<AiFilter>("all");
   const [showAll, setShowAll] = useState(false);
   const [importOpen, setImportOpen] = useState(Boolean(importResult));
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
+  const [bulkConfirm, setBulkConfirm] = useState<BulkConfirmState | null>(null);
+  const [isBulkPending, startBulkTransition] = useTransition();
 
   const filteredWords = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -144,6 +171,14 @@ export function DeckDetailClient({
   }, [deck.words, filter, search]);
 
   const visibleWords = showAll ? filteredWords : filteredWords.slice(0, 5);
+  const visibleWordIds = useMemo(
+    () => visibleWords.map((word) => word.id),
+    [visibleWords],
+  );
+  const allVisibleSelected =
+    visibleWordIds.length > 0 &&
+    visibleWordIds.every((wordId) => selectedIds.has(wordId));
+  const missingAiCount = deck.words.filter((word) => !hasAiDetails(word)).length;
 
   function openCreateModal() {
     setDraft(emptyDraft);
@@ -165,6 +200,110 @@ export function DeckDetailClient({
     }
 
     setModal(null);
+  }
+
+  function toggleWordSelection(wordId: string, checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+
+      if (checked) {
+        next.add(wordId);
+      } else {
+        next.delete(wordId);
+      }
+
+      return next;
+    });
+  }
+
+  function toggleVisibleSelection(checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+
+      for (const wordId of visibleWordIds) {
+        if (checked) {
+          next.add(wordId);
+        } else {
+          next.delete(wordId);
+        }
+      }
+
+      return next;
+    });
+  }
+
+  function requestSelectedBulkAi() {
+    const wordIds = Array.from(selectedIds);
+
+    if (wordIds.length === 0) {
+      setBulkResult({
+        totalRequested: 0,
+        successCount: 0,
+        failedCount: 0,
+        skippedCount: 0,
+        failedWords: [],
+        error: "Select at least one word.",
+      });
+      return;
+    }
+
+    setBulkConfirm({
+      mode: "SELECTED",
+      count: wordIds.length,
+      wordIds,
+    });
+  }
+
+  function requestMissingBulkAi() {
+    if (missingAiCount === 0) {
+      setBulkResult({
+        totalRequested: 0,
+        successCount: 0,
+        failedCount: 0,
+        skippedCount: 0,
+        failedWords: [],
+        error: "No missing AI words found.",
+      });
+      return;
+    }
+
+    setBulkConfirm({
+      mode: "MISSING_AI",
+      count: missingAiCount,
+    });
+  }
+
+  function runBulkAi() {
+    if (!bulkConfirm) {
+      return;
+    }
+
+    const payload = bulkConfirm;
+    setBulkResult(null);
+    setBulkConfirm(null);
+
+    startBulkTransition(async () => {
+      const result = await generateBulkWordDetailsAction({
+        deckId: deck.id,
+        mode: payload.mode,
+        wordIds: payload.wordIds,
+      });
+
+      setBulkResult({
+        totalRequested: result.totalRequested,
+        successCount: result.successCount,
+        failedCount: result.failedCount,
+        skippedCount: result.skippedCount,
+        failedWords: result.failedWords,
+        error: result.error,
+      });
+
+      if (result.successCount > 0) {
+        setSelectedIds(new Set());
+      }
+
+      router.refresh();
+    });
   }
 
   return (
@@ -212,10 +351,47 @@ export function DeckDetailClient({
       ) : null}
 
       {importResult ? (
-        <div className="grid gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800 md:grid-cols-3">
-          <span>Imported: {importResult.imported}</span>
-          <span>Skipped: {importResult.skipped}</span>
-          <span>Duplicates: {importResult.duplicate}</span>
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+          <div className="grid gap-3 font-bold md:grid-cols-3">
+            <span>Imported: {importResult.imported}</span>
+            <span>Skipped: {importResult.skipped}</span>
+            <span>Duplicates: {importResult.duplicate}</span>
+          </div>
+          <p className="mt-3 font-medium">
+            Import tugadi. Endi Missing AI uchun yaratish tugmasi orqali ta'rif
+            va misollarni to'ldiring.
+          </p>
+        </div>
+      ) : null}
+
+      {bulkResult ? (
+        <div
+          className={cn(
+            "rounded-2xl border px-4 py-3 text-sm font-bold",
+            bulkResult.error
+              ? "border-rose-200 bg-rose-50 text-rose-700"
+              : "border-blue-200 bg-blue-50 text-blue-800",
+          )}
+        >
+          {bulkResult.error ? (
+            bulkResult.error
+          ) : (
+            <div className="space-y-2">
+              <p>
+                AI yaratildi: {bulkResult.successCount} ta, xato:{" "}
+                {bulkResult.failedCount} ta, o'tkazildi:{" "}
+                {bulkResult.skippedCount} ta
+              </p>
+              {bulkResult.failedWords.some(
+                (word) => word.errorCode === "HTTP_429",
+              ) ? (
+                <p className="font-semibold">
+                  Gemini limiti vaqtincha to'ldi. Biroz kutib qayta urinib
+                  ko'ring.
+                </p>
+              ) : null}
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -270,12 +446,67 @@ export function DeckDetailClient({
                   </div>
                 </div>
 
+                <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-bold text-slate-700 ring-1 ring-indigo-100">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        onChange={(event) =>
+                          toggleVisibleSelection(event.target.checked)
+                        }
+                        className="size-4 accent-indigo-600"
+                      />
+                      Select visible
+                    </label>
+                    <span className="text-sm font-bold text-indigo-800">
+                      Selected: {selectedIds.size}
+                    </span>
+                    <span className="text-sm font-semibold text-slate-600">
+                      Missing AI: {missingAiCount}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={requestSelectedBulkAi}
+                      disabled={isBulkPending || selectedIds.size === 0}
+                    >
+                      <Sparkles />
+                      {isBulkPending
+                        ? "AI yaratilmoqda..."
+                        : "Tanlanganlarga AI yaratish"}
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={requestMissingBulkAi}
+                      disabled={isBulkPending || missingAiCount === 0}
+                    >
+                      <Sparkles />
+                      {isBulkPending
+                        ? "AI yaratilmoqda..."
+                        : "Missing AI uchun yaratish"}
+                    </Button>
+                  </div>
+                </div>
+
+                {isBulkPending ? (
+                  <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">
+                    AI yaratilmoqda... bu biroz vaqt olishi mumkin
+                  </div>
+                ) : null}
+
                 <div className="mt-5 space-y-2">
                   {visibleWords.length > 0 ? (
                     visibleWords.map((word) => (
                       <WordRow
                         key={word.id}
                         word={word}
+                        selected={selectedIds.has(word.id)}
+                        onSelectedChange={(checked) =>
+                          toggleWordSelection(word.id, checked)
+                        }
                         onOpen={() => openEditModal(word)}
                       />
                     ))
@@ -353,6 +584,15 @@ export function DeckDetailClient({
           onClose={closeModal}
         />
       ) : null}
+
+      {bulkConfirm ? (
+        <BulkConfirmModal
+          count={bulkConfirm.count}
+          isPending={isBulkPending}
+          onCancel={() => setBulkConfirm(null)}
+          onConfirm={runBulkAi}
+        />
+      ) : null}
     </section>
   );
 }
@@ -393,7 +633,17 @@ function FilterButton({
   );
 }
 
-function WordRow({ word, onOpen }: { word: DeckWord; onOpen: () => void }) {
+function WordRow({
+  word,
+  selected,
+  onSelectedChange,
+  onOpen,
+}: {
+  word: DeckWord;
+  selected: boolean;
+  onSelectedChange: (checked: boolean) => void;
+  onOpen: () => void;
+}) {
   const complete = hasAiDetails(word);
 
   return (
@@ -407,8 +657,20 @@ function WordRow({ word, onOpen }: { word: DeckWord; onOpen: () => void }) {
           onOpen();
         }
       }}
-      className="group grid cursor-pointer gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-lg hover:shadow-indigo-100 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] md:items-center"
+      className="group grid cursor-pointer gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-lg hover:shadow-indigo-100 md:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_auto] md:items-center"
     >
+      <label
+        className="flex size-9 items-center justify-center rounded-xl bg-slate-50 ring-1 ring-slate-200"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={(event) => onSelectedChange(event.target.checked)}
+          className="size-4 accent-indigo-600"
+          aria-label={`Select ${word.english}`}
+        />
+      </label>
       <div className="min-w-0">
         <p className="truncate text-sm font-bold text-slate-950">{word.english}</p>
         <p className="mt-0.5 text-xs font-medium text-slate-500">English</p>
@@ -437,6 +699,60 @@ function WordRow({ word, onOpen }: { word: DeckWord; onOpen: () => void }) {
         <Pencil />
         Edit
       </Button>
+    </div>
+  );
+}
+
+function BulkConfirmModal({
+  count,
+  isPending,
+  onCancel,
+  onConfirm,
+}: {
+  count: number;
+  isPending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-3xl border border-white/80 bg-white p-6 shadow-2xl shadow-slate-950/20">
+        <div className="flex items-start gap-3">
+          <div className="rounded-2xl bg-indigo-50 p-3 text-indigo-600 ring-1 ring-indigo-100">
+            <Sparkles className="size-5" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">
+              Bulk AI
+            </p>
+            <h2 className="mt-1 text-xl font-bold text-slate-950">
+              AI ma'lumot yaratish
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              {count} ta so'z uchun AI ma'lumot yaratiladi. Davom etasizmi?
+              To'liq AI ma'lumotga ega so'zlar o'tkazib yuboriladi.
+            </p>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              Ko'p so'zga AI yaratish biroz vaqt oladi. Limitga tushmaslik
+              uchun so'zlar ketma-ket generatsiya qilinadi.
+            </p>
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel}
+            disabled={isPending}
+          >
+            Cancel
+          </Button>
+          <Button type="button" onClick={onConfirm} disabled={isPending}>
+            <Sparkles />
+            {isPending ? "AI yaratilmoqda..." : "Davom etish"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
