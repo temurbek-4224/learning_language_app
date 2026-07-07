@@ -111,6 +111,7 @@ export default async function TeacherClassesPage({
         <div className="grid gap-4 lg:grid-cols-2">
           {classes.map((classRoom) => {
             const inviteLink = getInviteLink(classRoom.inviteCode);
+            const startCommand = `/start class_${classRoom.inviteCode}`;
             const displayLink =
               inviteLink ??
               `https://t.me/<TELEGRAM_BOT_USERNAME>?start=class_${classRoom.inviteCode}`;
@@ -183,7 +184,10 @@ export default async function TeacherClassesPage({
                     Real Telegram bot production database bilan ishlaydi.
                     Localhostdagi class link production botda ishlamasligi mumkin.
                   </p>
-                  <InviteLinkControls inviteLink={inviteLink} />
+                  <InviteLinkControls
+                    inviteLink={inviteLink}
+                    startCommand={startCommand}
+                  />
                 </div>
               </article>
             );

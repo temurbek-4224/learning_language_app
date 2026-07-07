@@ -71,6 +71,7 @@ export default async function ClassDetailPage({ params }: ClassDetailPageProps) 
   }
 
   const inviteLink = getInviteLink(classRoom.inviteCode);
+  const startCommand = `/start class_${classRoom.inviteCode}`;
   const displayLink =
     inviteLink ??
     `https://t.me/<TELEGRAM_BOT_USERNAME>?start=class_${classRoom.inviteCode}`;
@@ -115,7 +116,10 @@ export default async function ClassDetailPage({ params }: ClassDetailPageProps) 
           Real Telegram bot production database bilan ishlaydi. Localhostdagi
           class link production botda ishlamasligi mumkin.
         </p>
-        <InviteLinkControls inviteLink={inviteLink} />
+        <InviteLinkControls
+          inviteLink={inviteLink}
+          startCommand={startCommand}
+        />
       </div>
 
       <div className="rounded-3xl border border-white/80 bg-white p-6 shadow-xl shadow-slate-200/70">

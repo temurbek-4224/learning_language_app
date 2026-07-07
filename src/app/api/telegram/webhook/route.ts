@@ -6,6 +6,12 @@ import { upsertTelegramStudent } from "@/lib/student-auth";
 
 export const dynamic = "force-dynamic";
 
+const MINI_APP_BUTTON_TEXT = "Darslarni ochish";
+const FALLBACK_MESSAGE =
+  "WordXotira’ga xush kelibsiz. Ustozingiz bergan class link orqali darslarga qo‘shiling.";
+const ERROR_MESSAGE =
+  "Xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko‘ring.";
+
 function getMiniAppUrl() {
   const appUrl = process.env.APP_URL?.replace(/\/$/, "");
 
@@ -24,7 +30,7 @@ function miniAppKeyboard() {
       inline_keyboard: [
         [
           {
-            text: "Darslarni ochish",
+            text: MINI_APP_BUTTON_TEXT,
             web_app: { url },
           },
         ],
@@ -33,28 +39,83 @@ function miniAppKeyboard() {
   };
 }
 
-function extractStartParam(ctx: Context) {
+function getMessageText(ctx: Context) {
   const text =
     ctx.message && "text" in ctx.message && typeof ctx.message.text === "string"
       ? ctx.message.text
       : "";
 
-  return text.split(/\s+/)[1]?.trim() ?? "";
+  return text.trim();
 }
 
-async function handleStart(ctx: Context) {
+function extractInviteCodeFromText(text: string) {
+  const trimmed = text.trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  const startMatch = trimmed.match(/^\/start(?:@\w+)?(?:\s+(.+))?$/i);
+  const startPayload = startMatch?.[1]?.trim();
+
+  if (startPayload?.startsWith("class_")) {
+    return startPayload.replace(/^class_/, "").trim();
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const startParam = url.searchParams.get("start");
+
+    if (startParam?.startsWith("class_")) {
+      return startParam.replace(/^class_/, "").trim();
+    }
+  } catch {
+    // Not a URL; continue with direct payload parsing.
+  }
+
+  if (trimmed.startsWith("class_")) {
+    return trimmed.replace(/^class_/, "").trim();
+  }
+
+  return "";
+}
+
+function isStartWithoutPayload(text: string) {
+  return /^\/start(?:@\w+)?$/i.test(text.trim());
+}
+
+function isStartMessage(text: string) {
+  return /^\/start(?:@\w+)?(?:\s|$)/i.test(text.trim());
+}
+
+function getUpdateMessageChatId(update: Update | null) {
+  if (!update || !("message" in update)) {
+    return null;
+  }
+
+  return update.message.chat.id;
+}
+
+async function replyWithMiniApp(ctx: Context, text: string) {
+  try {
+    await ctx.reply(text, miniAppKeyboard());
+    console.log("[telegram-webhook] sendMessage success", {
+      hasMiniAppUrl: Boolean(getMiniAppUrl()),
+    });
+  } catch (error) {
+    console.error("[telegram-webhook] sendMessage fail", {
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
+  }
+}
+
+async function joinClassFromInvite(ctx: Context, inviteCode: string) {
   const from = ctx.from;
 
   if (!from) {
     return;
   }
-
-  const startParam = extractStartParam(ctx);
-
-  console.log("[telegram-webhook] received start payload", {
-    hasPayload: Boolean(startParam),
-    payloadType: startParam.startsWith("class_") ? "class" : "other",
-  });
 
   const student = await upsertTelegramStudent({
     id: String(from.id),
@@ -64,18 +125,9 @@ async function handleStart(ctx: Context) {
     languageCode: from.language_code ?? null,
   });
 
-  if (!startParam.startsWith("class_")) {
-    await ctx.reply(
-      "WordXotira'ga xush kelibsiz. Ustozingiz bergan class link orqali darslarga qo'shiling.",
-      miniAppKeyboard(),
-    );
-    return;
-  }
-
-  const inviteCode = startParam.replace(/^class_/, "").trim();
-
   console.log("[telegram-webhook] extracted inviteCode", {
-    hasInviteCode: Boolean(inviteCode),
+    inviteCode,
+    appUrlExists: Boolean(process.env.APP_URL),
   });
 
   const classRoom = await prisma.classRoom.findUnique({
@@ -88,11 +140,12 @@ async function handleStart(ctx: Context) {
   });
 
   console.log("[telegram-webhook] class lookup", {
-    classFound: Boolean(classRoom?.isActive),
+    classFound: Boolean(classRoom),
   });
 
   if (!classRoom || !classRoom.isActive) {
-    await ctx.reply("Bu class link topilmadi yoki faol emas.");
+    console.log("[telegram-webhook] join result", { result: "invalid" });
+    await replyWithMiniApp(ctx, "Bu class link topilmadi yoki faol emas.");
     return;
   }
 
@@ -116,16 +169,50 @@ async function handleStart(ctx: Context) {
     });
   }
 
-  console.log("[telegram-webhook] membership result", {
-    studentJoined: joined,
+  console.log("[telegram-webhook] join result", {
+    result: joined ? "joined" : "already",
   });
 
-  await ctx.reply(
+  await replyWithMiniApp(
+    ctx,
     joined
-      ? `Classga qo'shildingiz: ${classRoom.title}`
-      : "Siz bu classga allaqachon qo'shilgansiz.",
-    miniAppKeyboard(),
+      ? `Classga qo‘shildingiz: ${classRoom.title}`
+      : "Siz bu classga allaqachon qo‘shilgansiz.",
   );
+}
+
+async function handleTextMessage(ctx: Context) {
+  const text = getMessageText(ctx);
+
+  console.log("[telegram-webhook] received message text", {
+    text,
+    appUrlExists: Boolean(process.env.APP_URL),
+  });
+
+  if (!text) {
+    return;
+  }
+
+  if (isStartWithoutPayload(text)) {
+    await replyWithMiniApp(ctx, FALLBACK_MESSAGE);
+    return;
+  }
+
+  const inviteCode = extractInviteCodeFromText(text);
+
+  console.log("[telegram-webhook] extracted inviteCode", {
+    inviteCode,
+    appUrlExists: Boolean(process.env.APP_URL),
+  });
+
+  if (inviteCode) {
+    await joinClassFromInvite(ctx, inviteCode);
+    return;
+  }
+
+  if (isStartMessage(text)) {
+    await replyWithMiniApp(ctx, FALLBACK_MESSAGE);
+  }
 }
 
 export async function POST(request: Request) {
@@ -141,25 +228,42 @@ export async function POST(request: Request) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
 
   if (!token) {
-    return new Response("Telegram bot token is not configured.", {
-      status: 500,
-    });
+    console.error("[telegram-webhook] token missing");
+    return Response.json({ ok: false });
   }
 
   const bot = new Telegraf(token);
 
-  bot.start(handleStart);
+  bot.on("text", handleTextMessage);
 
-  const update = (await request.json()) as Update;
+  let update: Update | null = null;
 
   try {
+    update = (await request.json()) as Update;
     await bot.handleUpdate(update);
   } catch (error) {
     console.error("[telegram-webhook] update handling failed", {
-      updateId: update.update_id,
+      updateId: update?.update_id,
       error: error instanceof Error ? error.message : "Unknown error",
     });
-    throw error;
+
+    const chatId = getUpdateMessageChatId(update);
+
+    if (chatId) {
+      try {
+        await bot.telegram.sendMessage(chatId, ERROR_MESSAGE, {
+          reply_markup: miniAppKeyboard()?.reply_markup,
+        });
+        console.log("[telegram-webhook] sendMessage success", {
+          hasMiniAppUrl: Boolean(getMiniAppUrl()),
+        });
+      } catch (sendError) {
+        console.error("[telegram-webhook] sendMessage fail", {
+          error:
+            sendError instanceof Error ? sendError.message : "Unknown error",
+        });
+      }
+    }
   }
 
   return Response.json({ ok: true });

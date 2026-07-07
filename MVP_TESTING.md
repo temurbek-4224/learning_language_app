@@ -62,12 +62,26 @@ The setup command uses `TELEGRAM_BOT_TOKEN` and sends `TELEGRAM_WEBHOOK_SECRET` 
    `https://learning-language-app-indol.vercel.app/teacher/classes`
 2. Create a class or open an existing class.
 3. Confirm the invite link is shown as `https://t.me/<TELEGRAM_BOT_USERNAME>?start=class_<inviteCode>`.
-4. Use Copy Link or Open in Telegram from the teacher UI.
-5. Confirm the bot replies that the student joined the class.
-6. Confirm the Mini App button opens `${APP_URL}/app`.
-7. In the teacher class page, confirm the student count increases.
+4. Copy the invite link:
+   `https://t.me/wordxotira_bot?start=class_<code>`
+5. Open the link in Telegram.
+6. Confirm the bot replies:
+   `Classga qo‘shildingiz: ...`
+7. Confirm the reply includes the inline Mini App button:
+   `Darslarni ochish`
+8. Tap `Darslarni ochish`.
+9. Confirm the Mini App opens.
+10. In the teacher class page, confirm the student count increases.
 
 Localhost class links may not work with the production webhook unless local and production use the same `DATABASE_URL`. For real Telegram testing, create the class in the production teacher panel and use the production invite link.
+
+Manual command test:
+
+```text
+/start class_<code>
+```
+
+Expected result: the same join reply and `Darslarni ochish` inline button.
 
 ## Test Mini App
 

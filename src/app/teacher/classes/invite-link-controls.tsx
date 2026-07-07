@@ -7,10 +7,19 @@ import { Button } from "@/components/ui/button";
 
 type InviteLinkControlsProps = {
   inviteLink: string | null;
+  startCommand: string;
 };
 
-export function InviteLinkControls({ inviteLink }: InviteLinkControlsProps) {
-  const [copied, setCopied] = useState(false);
+export function InviteLinkControls({
+  inviteLink,
+  startCommand,
+}: InviteLinkControlsProps) {
+  const [copied, setCopied] = useState<"link" | "command" | null>(null);
+
+  function markCopied(type: "link" | "command") {
+    setCopied(type);
+    window.setTimeout(() => setCopied(null), 1800);
+  }
 
   async function copyLink() {
     if (!inviteLink) {
@@ -18,8 +27,12 @@ export function InviteLinkControls({ inviteLink }: InviteLinkControlsProps) {
     }
 
     await navigator.clipboard.writeText(inviteLink);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    markCopied("link");
+  }
+
+  async function copyStartCommand() {
+    await navigator.clipboard.writeText(startCommand);
+    markCopied("command");
   }
 
   function openLink() {
@@ -39,8 +52,17 @@ export function InviteLinkControls({ inviteLink }: InviteLinkControlsProps) {
         onClick={copyLink}
         disabled={!inviteLink}
       >
-        {copied ? <Check /> : <Copy />}
-        {copied ? "Link nusxalandi" : "Copy Link"}
+        {copied === "link" ? <Check /> : <Copy />}
+        {copied === "link" ? "Link nusxalandi" : "Copy Link"}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={copyStartCommand}
+      >
+        {copied === "command" ? <Check /> : <Copy />}
+        {copied === "command" ? "Command nusxalandi" : "Copy Start Command"}
       </Button>
       <Button
         type="button"
