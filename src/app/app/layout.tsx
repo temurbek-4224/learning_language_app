@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Script from "next/script";
 import { BookOpen, GraduationCap, Home } from "lucide-react";
 
 import { TelegramSessionInit } from "./telegram-session-init";
@@ -10,6 +11,7 @@ export default function StudentMiniAppLayout({
 }>) {
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#eef2ff_0%,#f8fafc_38%,#ffffff_100%)] text-slate-950">
+      <Script src="https://telegram.org/js/telegram-web-app.js" />
       <TelegramSessionInit />
       <main className="mx-auto min-h-screen w-full max-w-md px-4 pb-24 pt-5">
         {children}

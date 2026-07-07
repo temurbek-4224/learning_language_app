@@ -81,6 +81,14 @@ Localhost class links may not work with the production webhook unless local and 
 5. Confirm the newly joined class appears in the classes list.
 6. Open a class and confirm assigned lessons are visible as placeholders only.
 
+## Mini App Session Troubleshooting
+
+- The Mini App must be opened inside Telegram so `https://telegram.org/js/telegram-web-app.js` can provide signed `initData`.
+- If the app shows `Mini App faqat Telegram ichida ochilganda ishlaydi.`, reopen it from the bot's `Darslarni ochish` button inside Telegram.
+- If production still shows the session error inside Telegram, confirm the bot's Mini App URL is `https://learning-language-app-indol.vercel.app/app`.
+- Local browser testing still uses the `DEV_TELEGRAM_ID` fallback when `NODE_ENV` is not `production`.
+- For real Telegram testing, use production classes from `https://learning-language-app-indol.vercel.app/teacher/classes`.
+
 ## Common Issues
 
 - `APP_URL` still points to `localhost`, so Telegram cannot reach the deployed app.

@@ -152,7 +152,15 @@ export async function POST(request: Request) {
 
   const update = (await request.json()) as Update;
 
-  await bot.handleUpdate(update);
+  try {
+    await bot.handleUpdate(update);
+  } catch (error) {
+    console.error("[telegram-webhook] update handling failed", {
+      updateId: update.update_id,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
+  }
 
   return Response.json({ ok: true });
 }
