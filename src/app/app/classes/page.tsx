@@ -4,6 +4,7 @@ import { ArrowRight, GraduationCap } from "lucide-react";
 import { getCurrentStudent } from "@/lib/student-auth";
 import { prisma } from "@/lib/prisma";
 import { AuthPending } from "../auth-pending";
+import { JoinClassForm } from "./join-class-form";
 
 export default async function StudentClassesPage() {
   const student = await getCurrentStudent();
@@ -28,6 +29,7 @@ export default async function StudentClassesPage() {
   return (
     <section className="space-y-4">
       <Header title="Classes" description="Siz qo'shilgan teacher classlar." />
+      <JoinClassForm />
 
       {memberships.length === 0 ? (
         <EmptyMessage text="Hali classga qo'shilmagansiz. Ustozingiz yuborgan link orqali qo'shiling." />

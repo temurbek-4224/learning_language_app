@@ -13,7 +13,23 @@ Set these in Vercel before deploying:
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
 
-For local development, `APP_URL` can be `http://localhost:3000`. For production Telegram testing, `APP_URL` must be the HTTPS Vercel URL, for example `https://your-app.vercel.app`.
+For local development, `APP_URL` can be `http://localhost:3000`. For production Telegram testing, `APP_URL` must be the HTTPS Vercel URL:
+
+```text
+https://learning-language-app-indol.vercel.app
+```
+
+Production Mini App URL:
+
+```text
+https://learning-language-app-indol.vercel.app/app
+```
+
+Production webhook URL:
+
+```text
+https://learning-language-app-indol.vercel.app/api/telegram/webhook
+```
 
 ## Deploy Steps
 
@@ -42,24 +58,33 @@ The setup command uses `TELEGRAM_BOT_TOKEN` and sends `TELEGRAM_WEBHOOK_SECRET` 
 
 ## Test Class Invite
 
-1. Sign in as a teacher.
+1. Sign in as a teacher in the production teacher panel:
+   `https://learning-language-app-indol.vercel.app/teacher/classes`
 2. Create a class or open an existing class.
 3. Confirm the invite link is shown as `https://t.me/<TELEGRAM_BOT_USERNAME>?start=class_<inviteCode>`.
-4. Open the link in Telegram with a real student Telegram account.
+4. Use Copy Link or Open in Telegram from the teacher UI.
 5. Confirm the bot replies that the student joined the class.
 6. Confirm the Mini App button opens `${APP_URL}/app`.
 7. In the teacher class page, confirm the student count increases.
+
+Localhost class links may not work with the production webhook unless local and production use the same `DATABASE_URL`. For real Telegram testing, create the class in the production teacher panel and use the production invite link.
 
 ## Test Mini App
 
 1. Open the bot message's Mini App button inside Telegram.
 2. Confirm the student home page loads.
 3. Confirm joined classes are listed under `/app/classes`.
-4. Open a class and confirm assigned lessons are visible as placeholders only.
+4. On `/app/classes`, test joining by entering each supported format:
+   `https://t.me/wordxotira_bot?start=class_abc123`
+   `class_abc123`
+   `abc123`
+5. Confirm the newly joined class appears in the classes list.
+6. Open a class and confirm assigned lessons are visible as placeholders only.
 
 ## Common Issues
 
 - `APP_URL` still points to `localhost`, so Telegram cannot reach the deployed app.
+- `APP_URL` is not `https://learning-language-app-indol.vercel.app` in Vercel.
 - Telegram webhook was not set after deployment.
 - Vercel environment variables changed but the app was not redeployed.
 - `DATABASE_URL` is missing or points to the wrong database.

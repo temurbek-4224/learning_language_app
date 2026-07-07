@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+import { InviteLinkControls } from "../invite-link-controls";
+
 type ClassDetailPageProps = {
   params: Promise<{
     id: string;
@@ -97,7 +99,7 @@ export default async function ClassDetailPage({ params }: ClassDetailPageProps) 
 
       {!process.env.TELEGRAM_BOT_USERNAME ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
-          TELEGRAM_BOT_USERNAME is missing. Invite links will show as placeholders.
+          TELEGRAM_BOT_USERNAME env topilmadi.
         </div>
       ) : null}
 
@@ -109,6 +111,11 @@ export default async function ClassDetailPage({ params }: ClassDetailPageProps) 
         <p className="break-all rounded-xl bg-white px-3 py-2 font-mono text-xs text-slate-700 ring-1 ring-indigo-100">
           {displayLink}
         </p>
+        <p className="mt-2 text-xs font-semibold leading-5 text-slate-600">
+          Real Telegram bot production database bilan ishlaydi. Localhostdagi
+          class link production botda ishlamasligi mumkin.
+        </p>
+        <InviteLinkControls inviteLink={inviteLink} />
       </div>
 
       <div className="rounded-3xl border border-white/80 bg-white p-6 shadow-xl shadow-slate-200/70">

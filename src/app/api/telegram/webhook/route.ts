@@ -33,12 +33,28 @@ function miniAppKeyboard() {
   };
 }
 
+function extractStartParam(ctx: Context) {
+  const text =
+    ctx.message && "text" in ctx.message && typeof ctx.message.text === "string"
+      ? ctx.message.text
+      : "";
+
+  return text.split(/\s+/)[1]?.trim() ?? "";
+}
+
 async function handleStart(ctx: Context) {
   const from = ctx.from;
 
   if (!from) {
     return;
   }
+
+  const startParam = extractStartParam(ctx);
+
+  console.log("[telegram-webhook] received start payload", {
+    hasPayload: Boolean(startParam),
+    payloadType: startParam.startsWith("class_") ? "class" : "other",
+  });
 
   const student = await upsertTelegramStudent({
     id: String(from.id),
@@ -47,11 +63,6 @@ async function handleStart(ctx: Context) {
     lastName: from.last_name ?? null,
     languageCode: from.language_code ?? null,
   });
-  const text =
-    ctx.message && "text" in ctx.message && typeof ctx.message.text === "string"
-      ? ctx.message.text
-      : "";
-  const startParam = text.split(/\s+/)[1] ?? "";
 
   if (!startParam.startsWith("class_")) {
     await ctx.reply(
@@ -62,6 +73,11 @@ async function handleStart(ctx: Context) {
   }
 
   const inviteCode = startParam.replace(/^class_/, "").trim();
+
+  console.log("[telegram-webhook] extracted inviteCode", {
+    hasInviteCode: Boolean(inviteCode),
+  });
+
   const classRoom = await prisma.classRoom.findUnique({
     where: { inviteCode },
     select: {
@@ -71,27 +87,43 @@ async function handleStart(ctx: Context) {
     },
   });
 
+  console.log("[telegram-webhook] class lookup", {
+    classFound: Boolean(classRoom?.isActive),
+  });
+
   if (!classRoom || !classRoom.isActive) {
     await ctx.reply("Bu class link topilmadi yoki faol emas.");
     return;
   }
 
-  await prisma.classMember.upsert({
+  const existingMembership = await prisma.classMember.findUnique({
     where: {
       classId_studentId: {
         classId: classRoom.id,
         studentId: student.id,
       },
     },
-    create: {
-      classId: classRoom.id,
-      studentId: student.id,
-    },
-    update: {},
+    select: { id: true },
+  });
+  const joined = !existingMembership;
+
+  if (joined) {
+    await prisma.classMember.create({
+      data: {
+        classId: classRoom.id,
+        studentId: student.id,
+      },
+    });
+  }
+
+  console.log("[telegram-webhook] membership result", {
+    studentJoined: joined,
   });
 
   await ctx.reply(
-    `${classRoom.title} classiga qo'shildingiz. Darslarni Mini App orqali oching.`,
+    joined
+      ? `Classga qo'shildingiz: ${classRoom.title}`
+      : "Siz bu classga allaqachon qo'shilgansiz.",
     miniAppKeyboard(),
   );
 }
