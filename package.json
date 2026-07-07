@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "telegram:set-webhook": "node scripts/set-telegram-webhook.js",
+    "telegram:webhook-info": "node scripts/get-telegram-webhook-info.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
@@ -23,7 +25,8 @@
     "prisma": "^6.19.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "telegraf": "^4.16.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

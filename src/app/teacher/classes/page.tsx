@@ -111,7 +111,8 @@ export default async function TeacherClassesPage({
           {classes.map((classRoom) => {
             const inviteLink = getInviteLink(classRoom.inviteCode);
             const displayLink =
-              inviteLink ?? `t.me/<bot>?start=class_${classRoom.inviteCode}`;
+              inviteLink ??
+              `https://t.me/<TELEGRAM_BOT_USERNAME>?start=class_${classRoom.inviteCode}`;
 
             return (
               <article

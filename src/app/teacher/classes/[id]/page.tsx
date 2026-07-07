@@ -1,7 +1,7 @@
 import { AssignmentStatus, UserRole } from "@prisma/client";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ClipboardList, School } from "lucide-react";
+import { ArrowLeft, ClipboardList, Link2, School } from "lucide-react";
 
 import { EmptyState } from "@/components/dashboard/empty-state";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -20,6 +20,16 @@ function formatDate(date: Date) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
+}
+
+function getInviteLink(inviteCode: string) {
+  const username = process.env.TELEGRAM_BOT_USERNAME?.trim();
+
+  if (!username) {
+    return null;
+  }
+
+  return `https://t.me/${username}?start=class_${inviteCode}`;
 }
 
 export default async function ClassDetailPage({ params }: ClassDetailPageProps) {
@@ -58,6 +68,11 @@ export default async function ClassDetailPage({ params }: ClassDetailPageProps) 
     notFound();
   }
 
+  const inviteLink = getInviteLink(classRoom.inviteCode);
+  const displayLink =
+    inviteLink ??
+    `https://t.me/<TELEGRAM_BOT_USERNAME>?start=class_${classRoom.inviteCode}`;
+
   return (
     <section className="space-y-6">
       <PageHeader
@@ -78,6 +93,22 @@ export default async function ClassDetailPage({ params }: ClassDetailPageProps) 
         <Metric label="Students" value={classRoom._count.members.toString()} />
         <Metric label="Assignments" value={classRoom.assignments.length.toString()} />
         <Metric label="Created" value={formatDate(classRoom.createdAt)} />
+      </div>
+
+      {!process.env.TELEGRAM_BOT_USERNAME ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+          TELEGRAM_BOT_USERNAME is missing. Invite links will show as placeholders.
+        </div>
+      ) : null}
+
+      <div className="rounded-3xl border border-indigo-100 bg-indigo-50/70 p-5 shadow-sm shadow-indigo-100">
+        <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-indigo-700">
+          <Link2 className="size-4" />
+          Telegram invite link
+        </div>
+        <p className="break-all rounded-xl bg-white px-3 py-2 font-mono text-xs text-slate-700 ring-1 ring-indigo-100">
+          {displayLink}
+        </p>
       </div>
 
       <div className="rounded-3xl border border-white/80 bg-white p-6 shadow-xl shadow-slate-200/70">
