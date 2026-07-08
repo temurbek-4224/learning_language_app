@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BookOpen, Lock, ShieldAlert } from "lucide-react";
+import { BookOpen, CheckCircle2, Lock, ShieldAlert } from "lucide-react";
 
 import { getCurrentStudent } from "@/lib/student-auth";
 import { prisma } from "@/lib/prisma";
@@ -8,13 +8,17 @@ import { LessonPlayer } from "./lesson-player";
 
 type LessonPlaceholderPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ mode?: string }>;
 };
 
 export default async function StudentLessonPage({
   params,
+  searchParams,
 }: LessonPlaceholderPageProps) {
   const student = await getCurrentStudent();
   const { id } = await params;
+  const { mode } = await searchParams;
+  const failedOnly = mode === "failed";
 
   if (!student) {
     return <AuthPending />;
@@ -100,13 +104,83 @@ export default async function StudentLessonPage({
     return <FriendlyMessage icon={<BookOpen />} text="Bu lessonda hali so'zlar yo'q." />;
   }
 
+  let playerWords = lesson.words;
+
+  if (failedOnly) {
+    const progress = await prisma.studentLessonProgress.findUnique({
+      where: {
+        studentId_classLessonId: {
+          studentId: student.id,
+          classLessonId: lesson.id,
+        },
+      },
+      select: {
+        status: true,
+        answerLogs: {
+          where: {
+            activity: {
+              in: ["TRANSLATION_QUIZ", "DEFINITION_TYPING", "EXAMPLE"],
+            },
+          },
+          orderBy: { answeredAt: "asc" },
+          select: {
+            activity: true,
+            classLessonWordId: true,
+            isCorrect: true,
+          },
+        },
+      },
+    });
+
+    if (!progress || progress.status !== "COMPLETED") {
+      return (
+        <FriendlyMessage
+          icon={<Lock />}
+          text="Faqat yakunlangan lessonni qayta ishlash mumkin."
+          href={`/app/assignments/${lesson.assignment.id}`}
+        />
+      );
+    }
+
+    const latestByStepWord = new Map<
+      string,
+      { classLessonWordId: string | null; isCorrect: boolean }
+    >();
+
+    for (const log of progress.answerLogs) {
+      if (log.classLessonWordId) {
+        latestByStepWord.set(`${log.activity}:${log.classLessonWordId}`, log);
+      }
+    }
+
+    const failedWordIds = new Set<string>();
+
+    for (const log of latestByStepWord.values()) {
+      if (log.classLessonWordId && !log.isCorrect) {
+        failedWordIds.add(log.classLessonWordId);
+      }
+    }
+
+    if (failedWordIds.size === 0) {
+      return (
+        <FriendlyMessage
+          icon={<CheckCircle2 />}
+          text="Sizda xato so'zlar yo'q."
+          href={`/app/assignments/${lesson.assignment.id}`}
+        />
+      );
+    }
+
+    playerWords = lesson.words.filter((word) => failedWordIds.has(word.id));
+  }
+
   return (
     <LessonPlayer
       lessonId={lesson.id}
       assignmentId={lesson.assignment.id}
       title={lesson.title}
       classTitle={lesson.assignment.classRoom.title}
-      words={lesson.words}
+      words={playerWords}
     />
   );
 }

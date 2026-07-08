@@ -7,13 +7,15 @@ import { getCurrentStudent } from "@/lib/student-auth";
 
 type LessonAnswerInput = {
   wordId: string;
+  activity: "TRANSLATION_QUIZ" | "DEFINITION_TYPING" | "EXAMPLE";
   answer: string;
+  round: 1 | 2;
 };
 
 type CompleteLessonInput = {
   lessonId: string;
-  quizAnswers: LessonAnswerInput[];
-  typingAnswers: LessonAnswerInput[];
+  studyWordIds: string[];
+  attempts: LessonAnswerInput[];
 };
 
 export type CompleteLessonResult = {
@@ -54,6 +56,7 @@ export async function completeLesson(
           term: true,
           translation: true,
           definition: true,
+          example: true,
         },
       },
     },
@@ -87,44 +90,101 @@ export async function completeLesson(
     }
   }
 
-  const quizAnswers = new Map(
-    input.quizAnswers.map((answer) => [answer.wordId, answer.answer]),
+  const wordsById = new Map(lesson.words.map((word) => [word.id, word]));
+  const allowedActivities = new Set([
+    "TRANSLATION_QUIZ",
+    "DEFINITION_TYPING",
+    "EXAMPLE",
+  ]);
+
+  const activeWords = Array.from(new Set(input.studyWordIds))
+    .map((wordId) => wordsById.get(wordId))
+    .filter((word): word is NonNullable<typeof word> => Boolean(word));
+
+  if (activeWords.length === 0) {
+    return { ok: false, message: "Bu lessonda ishlash uchun so'z topilmadi." };
+  }
+
+  const exerciseActivities = [
+    "TRANSLATION_QUIZ",
+    "DEFINITION_TYPING",
+    "EXAMPLE",
+  ] as const;
+  const activeWordIds = new Set(activeWords.map((word) => word.id));
+  const attemptedStepWords = new Set(
+    input.attempts
+      .filter((attempt) => activeWordIds.has(attempt.wordId))
+      .map((attempt) => `${attempt.activity}:${attempt.wordId}`),
   );
-  const typingAnswers = new Map(
-    input.typingAnswers.map((answer) => [answer.wordId, answer.answer]),
+  const hasAllRequiredAttempts = activeWords.every((word) =>
+    exerciseActivities.every((activity) =>
+      attemptedStepWords.has(`${activity}:${word.id}`),
+    ),
   );
 
-  const logs = lesson.words.flatMap((word) => {
-    const quizAnswer = quizAnswers.get(word.id) ?? "";
-    const typingAnswer = typingAnswers.get(word.id) ?? "";
-    const expected = word.translation;
+  if (!hasAllRequiredAttempts) {
+    return {
+      ok: false,
+      message: "Mashqlar to'liq yakunlanmadi. Iltimos, qayta urinib ko'ring.",
+    };
+  }
 
-    return [
-      {
+  const studyLogs = activeWords.map((word) => ({
+      studentId: student.id,
+      classLessonWordId: word.id,
+      activity: "STUDY_CARDS" as const,
+      prompt: word.term,
+      expectedAnswer: word.term,
+      submittedAnswer: "viewed",
+      isCorrect: true,
+    }));
+
+  const exerciseLogs = input.attempts
+    .filter(
+      (attempt) =>
+        activeWordIds.has(attempt.wordId) &&
+        allowedActivities.has(attempt.activity),
+    )
+    .map((attempt) => {
+      const word = wordsById.get(attempt.wordId)!;
+      const expectedAnswer =
+        attempt.activity === "TRANSLATION_QUIZ"
+          ? word.translation
+          : word.term;
+      const prompt =
+        attempt.activity === "TRANSLATION_QUIZ"
+          ? word.term
+          : attempt.activity === "DEFINITION_TYPING"
+          ? `${word.definition || "Definition"} | ${word.translation}`
+          : word.example || word.term;
+
+      return {
         studentId: student.id,
         classLessonWordId: word.id,
-        activity: "TRANSLATION_QUIZ" as const,
-        prompt: `${word.term} so'zining tarjimasi qaysi?`,
-        expectedAnswer: expected,
-        submittedAnswer: quizAnswer,
-        isCorrect: normalizeAnswer(quizAnswer) === normalizeAnswer(expected),
-      },
-      {
-        studentId: student.id,
-        classLessonWordId: word.id,
-        activity: "DEFINITION_TYPING" as const,
-        prompt: word.definition
-          ? `${word.term}: ${word.definition}`
-          : `${word.term} so'zining tarjimasini yozing.`,
-        expectedAnswer: expected,
-        submittedAnswer: typingAnswer,
-        isCorrect: normalizeAnswer(typingAnswer) === normalizeAnswer(expected),
-      },
-    ];
-  });
+        activity: attempt.activity,
+        prompt: `${prompt} (chance ${attempt.round})`,
+        expectedAnswer,
+        submittedAnswer: attempt.answer,
+        isCorrect:
+          normalizeAnswer(attempt.answer) === normalizeAnswer(expectedAnswer),
+      };
+    });
 
-  const correctCount = logs.filter((log) => log.isCorrect).length;
-  const accuracy = Math.round((correctCount / logs.length) * 100);
+  const latestByStepWord = new Map<string, (typeof exerciseLogs)[number]>();
+  for (const log of exerciseLogs) {
+    latestByStepWord.set(`${log.activity}:${log.classLessonWordId}`, log);
+  }
+
+  const failedWordIds = new Set<string>();
+  for (const log of latestByStepWord.values()) {
+    if (!log.isCorrect && log.classLessonWordId) {
+      failedWordIds.add(log.classLessonWordId);
+    }
+  }
+
+  const correctWords = Math.max(lesson.words.length - failedWordIds.size, 0);
+  const accuracy = Math.round((correctWords / lesson.words.length) * 100);
+  const logs = [...studyLogs, ...exerciseLogs];
   const completedAt = new Date();
 
   try {

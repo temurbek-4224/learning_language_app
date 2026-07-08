@@ -1,10 +1,9 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BookOpen, CheckCircle2, Lock } from "lucide-react";
 
 import { getCurrentStudent } from "@/lib/student-auth";
 import { prisma } from "@/lib/prisma";
 import { AuthPending } from "../../auth-pending";
+import { LessonListClient } from "./lesson-list-client";
 
 type StudentAssignmentDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -37,7 +36,24 @@ export default async function StudentAssignmentDetailPage({
           _count: { select: { words: true } },
           progress: {
             where: { studentId: student.id },
-            select: { status: true, score: true, completedAt: true },
+            select: {
+              status: true,
+              score: true,
+              completedAt: true,
+              answerLogs: {
+                where: {
+                  activity: {
+                    in: ["TRANSLATION_QUIZ", "DEFINITION_TYPING", "EXAMPLE"],
+                  },
+                },
+                orderBy: { answeredAt: "asc" },
+                select: {
+                  activity: true,
+                  classLessonWordId: true,
+                  isCorrect: true,
+                },
+              },
+            },
             take: 1,
           },
         },
@@ -59,8 +75,8 @@ export default async function StudentAssignmentDetailPage({
         <p className="mt-2 text-sm text-indigo-50">{assignment.classRoom.title}</p>
       </div>
 
-      <div className="space-y-3">
-        {assignment.lessons.map((lesson, index) => {
+      <LessonListClient
+        lessons={assignment.lessons.map((lesson, index) => {
           const completed = lesson.progress.some(
             (progress) => progress.status === "COMPLETED",
           );
@@ -70,65 +86,30 @@ export default async function StudentAssignmentDetailPage({
               (progress) => progress.status === "COMPLETED",
             );
           const open = completed || previousCompleted;
+          const latestByStepWord = new Map<
+            string,
+            { classLessonWordId: string | null; isCorrect: boolean }
+          >();
 
-          return (
-            <Link
-              key={lesson.id}
-              href={open ? `/app/lessons/${lesson.id}` : "#"}
-              className={`flex items-center justify-between gap-3 rounded-3xl border p-4 shadow-sm ${
-                completed
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-950 shadow-emerald-100"
-                  : open
-                  ? "border-indigo-200 bg-white shadow-indigo-100"
-                  : "border-slate-200 bg-slate-50 text-slate-500"
-              }`}
-              aria-disabled={!open}
-            >
-              <span className="flex min-w-0 gap-3">
-                <span
-                  className={`flex size-11 shrink-0 items-center justify-center rounded-2xl ${
-                    completed
-                      ? "bg-emerald-100 text-emerald-700"
-                      : open
-                      ? "bg-indigo-50 text-indigo-600"
-                      : "bg-slate-100 text-slate-500"
-                  }`}
-                >
-                  {completed ? (
-                    <CheckCircle2 className="size-5" />
-                  ) : open ? (
-                    <BookOpen className="size-5" />
-                  ) : (
-                    <Lock className="size-5" />
-                  )}
-                </span>
-                <span>
-                  <span className="block font-bold">{lesson.title}</span>
-                  <span className="mt-1 block text-sm">
-                    {lesson._count.words} words -{" "}
-                    {completed
-                      ? `Completed${lesson.progress[0]?.score != null ? ` - ${lesson.progress[0].score}%` : ""}`
-                      : open
-                      ? "Boshlash mumkin"
-                      : "Locked"}
-                  </span>
-                </span>
-              </span>
-              <span
-                className={`rounded-xl px-3 py-2 text-xs font-bold ${
-                  completed
-                    ? "bg-emerald-100 text-emerald-700"
-                    : open
-                    ? "bg-indigo-600 text-white"
-                    : "bg-slate-100 text-slate-500"
-                }`}
-              >
-                {completed ? "Qayta ko'rish" : open ? "Boshlash" : "Locked"}
-              </span>
-            </Link>
-          );
+          for (const log of lesson.progress[0]?.answerLogs ?? []) {
+            if (log.classLessonWordId) {
+              latestByStepWord.set(`${log.activity}:${log.classLessonWordId}`, log);
+            }
+          }
+
+          return {
+            id: lesson.id,
+            title: lesson.title,
+            wordsCount: lesson._count.words,
+            completed,
+            open,
+            score: lesson.progress[0]?.score ?? null,
+            hasFailedWords: Array.from(latestByStepWord.values()).some(
+              (log) => !log.isCorrect,
+            ),
+          };
         })}
-      </div>
+      />
     </section>
   );
 }

@@ -37,6 +37,7 @@ enum ActivityType {
   STUDY_CARDS
   TRANSLATION_QUIZ
   DEFINITION_TYPING
+  EXAMPLE
 }
 
 model WebUser {
