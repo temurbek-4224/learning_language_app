@@ -95,12 +95,50 @@ Expected result: the same join reply and `Darslarni ochish` inline button.
 5. Confirm the newly joined class appears in the classes list.
 6. Open a class and confirm assigned lessons are visible as placeholders only.
 
+## Local Mini App Testing
+
+Local browser testing can use a development-only student fallback when Telegram
+`initData` is not available.
+
+1. Add these values to local `.env`:
+
+```env
+DEV_TELEGRAM_ID="123456789"
+DEV_FIRST_NAME="Dev"
+DEV_LAST_NAME="Student"
+DEV_USERNAME="dev_student"
+```
+
+2. Run the app:
+
+```bash
+npm run dev
+```
+
+3. Open:
+
+```text
+http://localhost:3000/app
+```
+
+4. Confirm the app loads and shows the `DEV MINI APP` badge.
+5. Open `/app/classes`.
+6. If the local database has no membership for the dev student, join a class
+   from `/app/classes` using the teacher invite code, `class_<code>`, or the
+   full Telegram invite link.
+7. After joining, `/app`, `/app/classes`, `/app/assignments/[id]`, and
+   `/app/lessons/[id]` can be tested with the dev student as long as the dev
+   student is a member of the class.
+
+Production still requires valid Telegram Mini App `initData`; the
+`DEV_TELEGRAM_ID` fallback is disabled when `NODE_ENV` is `production`.
+
 ## Mini App Session Troubleshooting
 
 - The Mini App must be opened inside Telegram so `https://telegram.org/js/telegram-web-app.js` can provide signed `initData`.
 - If the app shows `Mini App faqat Telegram ichida ochilganda ishlaydi.`, reopen it from the bot's `Darslarni ochish` button inside Telegram.
 - If production still shows the session error inside Telegram, confirm the bot's Mini App URL is `https://learning-language-app-indol.vercel.app/app`.
-- Local browser testing still uses the `DEV_TELEGRAM_ID` fallback when `NODE_ENV` is not `production`.
+- Local browser testing uses the `DEV_TELEGRAM_ID` fallback only outside production.
 - For real Telegram testing, use production classes from `https://learning-language-app-indol.vercel.app/teacher/classes`.
 
 ## Common Issues

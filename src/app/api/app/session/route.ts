@@ -8,15 +8,33 @@ export async function POST(request: Request) {
     initData?: unknown;
   } | null;
   const initData = typeof body?.initData === "string" ? body.initData : "";
-  const telegramUser = verifyTelegramInitData(initData);
+  const telegramUser = initData ? verifyTelegramInitData(initData) : null;
 
-  if (!telegramUser) {
+  if (initData && !telegramUser) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
-  const student = await upsertTelegramStudent(telegramUser);
+  if (telegramUser) {
+    const student = await upsertTelegramStudent(telegramUser);
+
+    await setStudentSession(student.id);
+
+    return NextResponse.json({ ok: true, devMode: false });
+  }
+
+  if (process.env.NODE_ENV === "production" || !process.env.DEV_TELEGRAM_ID) {
+    return NextResponse.json({ ok: false }, { status: 401 });
+  }
+
+  const student = await upsertTelegramStudent({
+    id: process.env.DEV_TELEGRAM_ID,
+    username: process.env.DEV_USERNAME ?? null,
+    firstName: process.env.DEV_FIRST_NAME ?? "Dev",
+    lastName: process.env.DEV_LAST_NAME ?? "Student",
+    languageCode: null,
+  });
 
   await setStudentSession(student.id);
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, devMode: true });
 }

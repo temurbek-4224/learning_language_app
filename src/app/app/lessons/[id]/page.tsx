@@ -117,11 +117,6 @@ export default async function StudentLessonPage({
       select: {
         status: true,
         answerLogs: {
-          where: {
-            activity: {
-              in: ["TRANSLATION_QUIZ", "DEFINITION_TYPING", "EXAMPLE"],
-            },
-          },
           orderBy: { answeredAt: "asc" },
           select: {
             activity: true,
@@ -148,7 +143,12 @@ export default async function StudentLessonPage({
     >();
 
     for (const log of progress.answerLogs) {
-      if (log.classLessonWordId) {
+      if (
+        log.classLessonWordId &&
+        ["TRANSLATION_QUIZ", "DEFINITION_TYPING", "EXAMPLE"].includes(
+          log.activity,
+        )
+      ) {
         latestByStepWord.set(`${log.activity}:${log.classLessonWordId}`, log);
       }
     }

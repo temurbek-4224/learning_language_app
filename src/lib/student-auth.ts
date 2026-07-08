@@ -77,7 +77,7 @@ export async function setStudentSession(studentId: string) {
     createStudentSessionToken(studentId),
     {
       httpOnly: true,
-      sameSite: "none",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/app",
       maxAge: 60 * 60 * 24 * 30,
