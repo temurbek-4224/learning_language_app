@@ -84,10 +84,14 @@ function escapeRegExp(value: string) {
 }
 
 function hashValue(value: string) {
-  return Array.from(value).reduce(
-    (total, char) => total + char.charCodeAt(0) * 17,
-    0,
-  );
+  let hash = 2166136261;
+
+  for (const char of value) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
 }
 
 function shuffledBySeed<T>(items: T[], seed: string, getKey: (item: T) => string) {
@@ -96,23 +100,25 @@ function shuffledBySeed<T>(items: T[], seed: string, getKey: (item: T) => string
   );
 }
 
-function buildOptions(word: LessonWord, words: LessonWord[]) {
+function buildOptions(word: LessonWord, words: LessonWord[], seed: number) {
   const distractors = words
     .filter((candidate) => candidate.id !== word.id)
     .map((candidate) => candidate.translation)
     .filter(
       (translation, index, list) =>
-        Boolean(translation) && list.indexOf(translation) === index,
+        Boolean(translation) &&
+        normalizeAnswer(translation) !== normalizeAnswer(word.translation) &&
+        list.indexOf(translation) === index,
     );
   const pickedDistractors = shuffledBySeed(
     distractors,
-    word.id,
+    `${word.id}:${seed}:distractors`,
     (item) => item,
   ).slice(0, 3);
 
   return shuffledBySeed(
     [word.translation, ...pickedDistractors],
-    `${word.id}:final`,
+    `${word.id}:${seed}:options`,
     (item) => item,
   );
 }
@@ -154,15 +160,16 @@ export function LessonPlayer({
   const [typingAnswer, setTypingAnswer] = useState("");
   const [exampleAnswer, setExampleAnswer] = useState("");
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [quizOptionSeed, setQuizOptionSeed] = useState(() => Date.now());
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
 
   const optionsByWord = useMemo(
     () =>
       Object.fromEntries(
-        words.map((word) => [word.id, buildOptions(word, words)]),
+        words.map((word) => [word.id, buildOptions(word, words, quizOptionSeed)]),
       ) as Record<string, string[]>,
-    [words],
+    [words, quizOptionSeed],
   );
 
   const failedByStep = {
@@ -209,6 +216,10 @@ export function LessonPlayer({
     setExampleAnswer("");
 
     if (state.index < state.queue.length - 1) {
+      if (stepName === "quiz") {
+        setQuizOptionSeed((value) => value + 1);
+      }
+
       setExerciseStates((current) => ({
         ...current,
         [stepName]: {
@@ -223,6 +234,10 @@ export function LessonPlayer({
 
     if (state.round === 1 && firstWrongIds.length > 0) {
       const retryQueue = words.filter((item) => firstWrongIds.includes(item.id));
+      if (stepName === "quiz") {
+        setQuizOptionSeed((value) => value + 1);
+      }
+
       setExerciseStates((current) => ({
         ...current,
         [stepName]: {
@@ -475,7 +490,7 @@ function QuizStep({
       state={state}
       icon={<Sparkles className="size-5" />}
     >
-      <h2 className="text-center text-4xl font-black text-slate-950">
+      <h2 className="text-center text-4xl font-black tracking-tight text-slate-950">
         {word.term}
       </h2>
       {state.round === 2 ? <RetryNote /> : null}
@@ -492,7 +507,7 @@ function QuizStep({
               type="button"
               onClick={() => onSelect(option)}
               disabled={Boolean(feedback)}
-              className={`flex min-h-14 w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left text-base font-extrabold shadow-sm transition-all active:scale-[0.99] ${
+              className={`flex min-h-13 w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left text-base font-extrabold shadow-sm transition-all active:scale-[0.99] ${
                 selected && feedback?.correct
                   ? "scale-[1.01] border-emerald-300 bg-emerald-50 text-emerald-800 shadow-emerald-100"
                   : selected
@@ -540,7 +555,7 @@ function TypingStep({
       state={state}
       icon={<Keyboard className="size-5" />}
     >
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         <InfoBlock label="Definition" value={word.definition || "Izoh kiritilmagan."} />
         <InfoBlock label="Uzbek" value={word.translation} />
       </div>
@@ -551,7 +566,7 @@ function TypingStep({
         status={activeFeedback ? (feedback.correct ? "correct" : "wrong") : "idle"}
       />
       <form
-        className="mt-5 space-y-3"
+        className="mt-4 space-y-3"
         onSubmit={(event) => {
           event.preventDefault();
           onSubmit();
@@ -562,7 +577,7 @@ function TypingStep({
           onChange={(event) => onAnswer(event.target.value)}
           disabled={Boolean(feedback)}
           autoFocus
-          className={`h-13 w-full rounded-2xl border bg-white px-4 text-center text-xl font-black text-slate-950 outline-none ring-indigo-200 transition focus:border-indigo-400 focus:ring-4 ${
+          className={`h-11 w-full rounded-2xl border bg-white px-4 text-center text-base font-black text-slate-950 outline-none ring-indigo-200 transition focus:border-indigo-400 focus:ring-4 ${
             activeFeedback && feedback.correct
               ? "border-emerald-300 bg-emerald-50"
               : activeFeedback
@@ -575,7 +590,7 @@ function TypingStep({
           type="submit"
           size="lg"
           disabled={!answer.trim() || Boolean(feedback)}
-          className="h-12 w-full rounded-2xl"
+          className="h-11 w-full rounded-2xl"
         >
           Tekshirish
         </Button>
@@ -609,7 +624,7 @@ function ExampleStep({
     >
       {state.round === 2 ? <RetryNote /> : null}
       <form
-        className="space-y-5"
+        className="space-y-4"
         onSubmit={(event) => {
           event.preventDefault();
           onSubmit();
@@ -626,7 +641,7 @@ function ExampleStep({
           type="submit"
           size="lg"
           disabled={!answer.trim() || Boolean(feedback)}
-          className="h-12 w-full rounded-2xl"
+          className="h-11 w-full rounded-2xl"
         >
           Tekshirish
         </Button>
@@ -808,24 +823,27 @@ function BlankSentence({
   const before = match ? example.slice(0, match.index) : "";
   const after = match ? example.slice((match.index || 0) + match[0].length) : example;
 
+  const blankWidth = `${Math.min(Math.max(word.term.length + 1, 5), 14)}ch`;
+
   return (
-    <div className="rounded-3xl bg-gradient-to-br from-indigo-50 to-blue-50 p-5 text-xl font-black leading-10 text-slate-950">
-      <span>{before}</span>
+    <div className="rounded-3xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-blue-50 p-4 text-base font-black leading-9 text-slate-950 shadow-inner shadow-white">
+      <span className="align-middle">{before}</span>
       <input
         value={answer}
         onChange={(event) => onAnswer(event.target.value)}
         disabled={disabled}
         autoFocus
-        className={`mx-1 inline-block h-11 min-w-28 max-w-full rounded-2xl border bg-white px-3 text-center text-lg font-black outline-none ring-indigo-200 transition focus:border-indigo-400 focus:ring-4 ${
+        style={{ width: blankWidth }}
+        className={`mx-1 inline-flex h-9 max-w-[9.5rem] align-middle rounded-xl border bg-white px-2.5 text-center text-base font-black outline-none ring-indigo-200 transition focus:border-indigo-400 focus:ring-4 ${
           status === "correct"
-            ? "animate-bounce border-emerald-300 bg-emerald-50 text-emerald-800"
+            ? "scale-105 animate-bounce border-emerald-300 bg-emerald-50 text-emerald-800 shadow-sm shadow-emerald-100"
             : status === "wrong"
-            ? "animate-pulse border-rose-300 bg-rose-50 text-rose-800"
-            : "border-indigo-200 text-slate-950"
+            ? "scale-105 animate-pulse border-rose-300 bg-rose-50 text-rose-800 shadow-sm shadow-rose-100"
+            : "border-indigo-200 text-slate-950 shadow-sm shadow-indigo-100"
         }`}
         placeholder="..."
       />
-      <span>{after}</span>
+      <span className="align-middle">{after}</span>
     </div>
   );
 }
@@ -843,11 +861,11 @@ function LetterBoxes({
   const entered = Array.from(answer.replace(/\s/g, ""));
 
   return (
-    <div className="mt-5 flex flex-wrap justify-center gap-2">
+    <div className="mt-4 flex flex-wrap justify-center gap-1.5">
       {letters.map((_, index) => (
         <span
           key={index}
-          className={`flex size-10 items-center justify-center rounded-xl border text-lg font-black uppercase shadow-sm transition-all ${
+          className={`flex size-8 items-center justify-center rounded-lg border text-sm font-black uppercase shadow-sm transition-all sm:size-9 sm:text-base ${
             status === "correct"
               ? "scale-105 border-emerald-300 bg-emerald-50 text-emerald-800"
               : status === "wrong"
