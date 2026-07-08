@@ -1,13 +1,22 @@
 "use server";
 
+import { ActivityType, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
 import { getCurrentStudent } from "@/lib/student-auth";
 
+type AnswerLogWithoutProgressId = Omit<
+  Prisma.StudentAnswerLogCreateManyInput,
+  "progressId"
+>;
+
 type LessonAnswerInput = {
   wordId: string;
-  activity: "TRANSLATION_QUIZ" | "DEFINITION_TYPING" | "EXAMPLE";
+  activity:
+    | typeof ActivityType.TRANSLATION_QUIZ
+    | typeof ActivityType.DEFINITION_TYPING
+    | typeof ActivityType.EXAMPLE;
   answer: string;
   round: 1 | 2;
 };
@@ -91,10 +100,10 @@ export async function completeLesson(
   }
 
   const wordsById = new Map(lesson.words.map((word) => [word.id, word]));
-  const allowedActivities = new Set([
-    "TRANSLATION_QUIZ",
-    "DEFINITION_TYPING",
-    "EXAMPLE",
+  const allowedActivities = new Set<ActivityType>([
+    ActivityType.TRANSLATION_QUIZ,
+    ActivityType.DEFINITION_TYPING,
+    ActivityType.EXAMPLE,
   ]);
 
   const activeWords = Array.from(new Set(input.studyWordIds))
@@ -106,9 +115,9 @@ export async function completeLesson(
   }
 
   const exerciseActivities = [
-    "TRANSLATION_QUIZ",
-    "DEFINITION_TYPING",
-    "EXAMPLE",
+    ActivityType.TRANSLATION_QUIZ,
+    ActivityType.DEFINITION_TYPING,
+    ActivityType.EXAMPLE,
   ] as const;
   const activeWordIds = new Set(activeWords.map((word) => word.id));
   const attemptedStepWords = new Set(
@@ -129,15 +138,17 @@ export async function completeLesson(
     };
   }
 
-  const studyLogs = activeWords.map((word) => ({
+  const studyLogs = activeWords.map(
+    (word): AnswerLogWithoutProgressId => ({
       studentId: student.id,
       classLessonWordId: word.id,
-      activity: "STUDY_CARDS" as const,
+      activity: ActivityType.STUDY_CARDS,
       prompt: word.term,
       expectedAnswer: word.term,
       submittedAnswer: "viewed",
       isCorrect: true,
-    }));
+    }),
+  );
 
   const exerciseLogs = input.attempts
     .filter(
@@ -148,13 +159,13 @@ export async function completeLesson(
     .map((attempt) => {
       const word = wordsById.get(attempt.wordId)!;
       const expectedAnswer =
-        attempt.activity === "TRANSLATION_QUIZ"
+        attempt.activity === ActivityType.TRANSLATION_QUIZ
           ? word.translation
           : word.term;
       const prompt =
-        attempt.activity === "TRANSLATION_QUIZ"
+        attempt.activity === ActivityType.TRANSLATION_QUIZ
           ? word.term
-          : attempt.activity === "DEFINITION_TYPING"
+          : attempt.activity === ActivityType.DEFINITION_TYPING
           ? `${word.definition || "Definition"} | ${word.translation}`
           : word.example || word.term;
 
@@ -167,7 +178,7 @@ export async function completeLesson(
         submittedAnswer: attempt.answer,
         isCorrect:
           normalizeAnswer(attempt.answer) === normalizeAnswer(expectedAnswer),
-      };
+      } satisfies AnswerLogWithoutProgressId;
     });
 
   const latestByStepWord = new Map<string, (typeof exerciseLogs)[number]>();
