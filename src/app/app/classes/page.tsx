@@ -20,7 +20,21 @@ export default async function StudentClassesPage() {
       classRoom: {
         include: {
           teacher: { select: { fullName: true } },
-          _count: { select: { assignments: true } },
+          assignments: {
+            where: { status: { not: "ARCHIVED" } },
+            include: {
+              lessons: {
+                select: {
+                  id: true,
+                  progress: {
+                    where: { studentId: student.id, status: "COMPLETED" },
+                    select: { id: true },
+                    take: 1,
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -35,31 +49,50 @@ export default async function StudentClassesPage() {
         <EmptyMessage text="Hali classga qo'shilmagansiz. Ustozingiz yuborgan link orqali qo'shiling." />
       ) : (
         <div className="space-y-3">
-          {memberships.map((membership) => (
-            <Link
-              key={membership.id}
-              href={`/app/classes/${membership.classId}`}
-              className="flex items-center justify-between gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200"
-            >
-              <span className="flex min-w-0 gap-3">
-                <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
-                  <GraduationCap className="size-5" />
+          {memberships.map((membership) => {
+            const totalLessons = membership.classRoom.assignments.reduce(
+              (sum, assignment) => sum + assignment.lessons.length,
+              0,
+            );
+            const completedLessons = membership.classRoom.assignments.reduce(
+              (sum, assignment) =>
+                sum +
+                assignment.lessons.filter((lesson) => lesson.progress.length > 0)
+                  .length,
+              0,
+            );
+            const percent =
+              totalLessons > 0
+                ? Math.round((completedLessons / totalLessons) * 100)
+                : 0;
+
+            return (
+              <Link
+                key={membership.id}
+                href={`/app/classes/${membership.classId}`}
+                className="flex items-center justify-between gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200"
+              >
+                <span className="flex min-w-0 gap-3">
+                  <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+                    <GraduationCap className="size-5" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-bold text-slate-950">
+                      {membership.classRoom.title}
+                    </span>
+                    <span className="mt-1 block text-sm text-slate-600">
+                      {membership.classRoom.teacher.fullName}
+                    </span>
+                    <span className="mt-2 block text-xs font-semibold text-slate-500">
+                      {membership.classRoom.assignments.length} assignments -{" "}
+                      {completedLessons}/{totalLessons} lessons ({percent}%)
+                    </span>
+                  </span>
                 </span>
-                <span className="min-w-0">
-                  <span className="block truncate font-bold text-slate-950">
-                    {membership.classRoom.title}
-                  </span>
-                  <span className="mt-1 block text-sm text-slate-600">
-                    {membership.classRoom.teacher.fullName}
-                  </span>
-                  <span className="mt-2 block text-xs font-semibold text-slate-500">
-                    {membership.classRoom._count.assignments} assignments - Progress later
-                  </span>
-                </span>
-              </span>
-              <ArrowRight className="size-5 shrink-0 text-indigo-600" />
-            </Link>
-          ))}
+                <ArrowRight className="size-5 shrink-0 text-indigo-600" />
+              </Link>
+            );
+          })}
         </div>
       )}
     </section>

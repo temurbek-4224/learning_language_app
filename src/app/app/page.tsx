@@ -21,8 +21,14 @@ export default async function StudentMiniAppPage() {
             where: { status: { not: "ARCHIVED" } },
             include: {
               lessons: {
+                orderBy: { sortOrder: "asc" },
                 include: {
                   _count: { select: { words: true } },
+                  progress: {
+                    where: { studentId: student.id },
+                    select: { status: true },
+                    take: 1,
+                  },
                 },
               },
             },
@@ -35,14 +41,30 @@ export default async function StudentMiniAppPage() {
     (sum, membership) => sum + membership.classRoom.assignments.length,
     0,
   );
-  const openLessons = memberships.reduce(
-    (sum, membership) =>
-      sum +
-      membership.classRoom.assignments.reduce(
-        (assignmentSum, assignment) => assignmentSum + assignment.lessons.length,
-        0,
-      ),
-    0,
+  const lessonStats = memberships.reduce(
+    (stats, membership) => {
+      membership.classRoom.assignments.forEach((assignment) => {
+        assignment.lessons.forEach((lesson, index) => {
+          const completed = lesson.progress.some(
+            (progress) => progress.status === "COMPLETED",
+          );
+          const previousCompleted =
+            index === 0 ||
+            assignment.lessons[index - 1].progress.some(
+              (progress) => progress.status === "COMPLETED",
+            );
+
+          if (completed) {
+            stats.completed += 1;
+          } else if (previousCompleted) {
+            stats.open += 1;
+          }
+        });
+      });
+
+      return stats;
+    },
+    { open: 0, completed: 0 },
   );
 
   return (
@@ -62,8 +84,8 @@ export default async function StudentMiniAppPage() {
       <div className="grid grid-cols-2 gap-3">
         <Metric icon={<GraduationCap />} label="Classes" value={memberships.length} />
         <Metric icon={<Layers3 />} label="Assignments" value={activeAssignments} />
-        <Metric icon={<BookOpen />} label="Open lessons" value={openLessons} />
-        <Metric icon={<BookOpen />} label="Completed" value={0} />
+        <Metric icon={<BookOpen />} label="Open lessons" value={lessonStats.open} />
+        <Metric icon={<BookOpen />} label="Completed" value={lessonStats.completed} />
       </div>
 
       <Link

@@ -33,7 +33,16 @@ export default async function StudentClassDetailPage({
             where: { status: { not: "ARCHIVED" } },
             orderBy: { assignedAt: "desc" },
             include: {
-              _count: { select: { lessons: true } },
+              lessons: {
+                select: {
+                  id: true,
+                  progress: {
+                    where: { studentId: student.id, status: "COMPLETED" },
+                    select: { id: true },
+                    take: 1,
+                  },
+                },
+              },
             },
           },
         },
@@ -63,31 +72,43 @@ export default async function StudentClassDetailPage({
         </div>
       ) : (
         <div className="space-y-3">
-          {membership.classRoom.assignments.map((assignment) => (
-            <Link
-              key={assignment.id}
-              href={`/app/assignments/${assignment.id}`}
-              className="flex items-center justify-between gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200"
-            >
-              <span className="flex min-w-0 gap-3">
-                <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
-                  <ClipboardList className="size-5" />
+          {membership.classRoom.assignments.map((assignment) => {
+            const totalLessons = assignment.lessons.length;
+            const completedLessons = assignment.lessons.filter(
+              (lesson) => lesson.progress.length > 0,
+            ).length;
+            const percent =
+              totalLessons > 0
+                ? Math.round((completedLessons / totalLessons) * 100)
+                : 0;
+
+            return (
+              <Link
+                key={assignment.id}
+                href={`/app/assignments/${assignment.id}`}
+                className="flex items-center justify-between gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200"
+              >
+                <span className="flex min-w-0 gap-3">
+                  <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+                    <ClipboardList className="size-5" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-bold text-slate-950">
+                      {assignment.title}
+                    </span>
+                    <span className="mt-1 block text-sm text-slate-600">
+                      {completedLessons}/{totalLessons} lessons completed -{" "}
+                      {percent}%
+                    </span>
+                    <span className="mt-2 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
+                      {assignment.status}
+                    </span>
+                  </span>
                 </span>
-                <span className="min-w-0">
-                  <span className="block truncate font-bold text-slate-950">
-                    {assignment.title}
-                  </span>
-                  <span className="mt-1 block text-sm text-slate-600">
-                    {assignment._count.lessons} lessons - 0 completed
-                  </span>
-                  <span className="mt-2 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
-                    {assignment.status}
-                  </span>
-                </span>
-              </span>
-              <ArrowRight className="size-5 shrink-0 text-indigo-600" />
-            </Link>
-          ))}
+                <ArrowRight className="size-5 shrink-0 text-indigo-600" />
+              </Link>
+            );
+          })}
         </div>
       )}
     </section>
