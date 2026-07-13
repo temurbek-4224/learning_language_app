@@ -248,6 +248,7 @@ model TemplateLessonWord {
   translation      String
   definition       String
   example          String?
+  pronunciationText String?
   audioUrl         String?
   sortOrder        Int
   createdAt        DateTime @default(now())
@@ -315,6 +316,7 @@ model ClassLessonWord {
   translation          String
   definition           String
   example              String?
+  pronunciationText    String?
   audioUrl              String?
   sortOrder            Int
   createdAt            DateTime @default(now())

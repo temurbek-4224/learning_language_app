@@ -27,6 +27,7 @@ type LessonWord = {
   translation: string;
   definition: string | null;
   example: string | null;
+  pronunciationText: string | null;
   audioUrl: string | null;
 };
 

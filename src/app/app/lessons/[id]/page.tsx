@@ -60,9 +60,10 @@ export default async function StudentLessonPage({
           translation: true,
           definition: true,
           example: true,
+          pronunciationText: true,
           audioUrl: true,
           deckWord: {
-            select: { audioUrl: true },
+            select: { pronunciationText: true, audioUrl: true },
           },
         },
       },
@@ -190,6 +191,8 @@ export default async function StudentLessonPage({
         translation: word.translation,
         definition: word.definition,
         example: word.example,
+        pronunciationText:
+          word.pronunciationText ?? word.deckWord?.pronunciationText ?? null,
         audioUrl: word.audioUrl ?? word.deckWord?.audioUrl ?? null,
       }))}
     />

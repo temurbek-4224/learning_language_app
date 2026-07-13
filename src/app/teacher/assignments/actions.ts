@@ -114,6 +114,7 @@ export async function createAssignmentTemplateAction(formData: FormData) {
           translation: true,
           definition: true,
           example: true,
+          pronunciationText: true,
           audioUrl: true,
         },
       },
@@ -162,6 +163,7 @@ export async function createAssignmentTemplateAction(formData: FormData) {
             translation: word.translation,
             definition: word.definition ?? "",
             example: word.example,
+            pronunciationText: word.pronunciationText,
             audioUrl: word.audioUrl,
             sortOrder: wordIndex,
           })),
@@ -293,6 +295,7 @@ export async function assignTemplateToClassesAction(
               translation: word.translation,
               definition: word.definition,
               example: word.example,
+              pronunciationText: word.pronunciationText,
               audioUrl: word.audioUrl,
               sortOrder: word.sortOrder,
             })),
@@ -382,6 +385,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
       translation: true,
       definition: true,
       example: true,
+      pronunciationText: true,
       audioUrl: true,
     },
   });
@@ -396,12 +400,18 @@ export async function syncAssignmentAiSnapshotsAction(input: {
   let failedCount = 0;
   const desiredByTemplateWordId = new Map<
     string,
-    { definition: string; example: string | null; audioUrl: string | null }
+    {
+      definition: string;
+      example: string | null;
+      pronunciationText: string | null;
+      audioUrl: string | null;
+    }
   >();
   const templateUpdates: Array<{
     id: string;
     definition: string;
     example: string | null;
+    pronunciationText: string | null;
     audioUrl: string | null;
   }> = [];
 
@@ -415,12 +425,14 @@ export async function syncAssignmentAiSnapshotsAction(input: {
         !source ||
         (!hasText(source.definition) &&
           !hasText(source.example) &&
+          !hasText(source.pronunciationText) &&
           !hasText(source.audioUrl))
       ) {
         noSourceAiCount += 1;
         desiredByTemplateWordId.set(word.id, {
           definition: word.definition,
           example: word.example,
+          pronunciationText: word.pronunciationText,
           audioUrl: word.audioUrl,
         });
         continue;
@@ -440,14 +452,21 @@ export async function syncAssignmentAiSnapshotsAction(input: {
         (overwriteExisting || !hasText(word.audioUrl))
           ? source.audioUrl?.trim() ?? word.audioUrl
           : word.audioUrl;
+      const nextPronunciationText =
+        hasText(source.pronunciationText) &&
+        (overwriteExisting || !hasText(word.pronunciationText))
+          ? source.pronunciationText?.trim() ?? word.pronunciationText
+          : word.pronunciationText;
       const templateChanged =
         nextDefinition !== word.definition ||
         nextExample !== word.example ||
+        nextPronunciationText !== word.pronunciationText ||
         nextAudioUrl !== word.audioUrl;
 
       desiredByTemplateWordId.set(word.id, {
         definition: nextDefinition,
         example: nextExample,
+        pronunciationText: nextPronunciationText,
         audioUrl: nextAudioUrl,
       });
 
@@ -456,6 +475,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
           id: word.id,
           definition: nextDefinition,
           example: nextExample,
+          pronunciationText: nextPronunciationText,
           audioUrl: nextAudioUrl,
         });
       } else {
@@ -469,6 +489,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
     id: string;
     definition: string;
     example: string | null;
+    pronunciationText: string | null;
     audioUrl: string | null;
   }> = [];
 
@@ -492,6 +513,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
         templateLessonWordId: true,
         definition: true,
         example: true,
+        pronunciationText: true,
         audioUrl: true,
       },
     });
@@ -521,16 +543,23 @@ export async function syncAssignmentAiSnapshotsAction(input: {
         (overwriteExisting || !hasText(classWord.audioUrl))
           ? desired.audioUrl
           : classWord.audioUrl;
+      const nextPronunciationText =
+        hasText(desired.pronunciationText) &&
+        (overwriteExisting || !hasText(classWord.pronunciationText))
+          ? desired.pronunciationText
+          : classWord.pronunciationText;
 
       if (
         nextDefinition !== classWord.definition ||
         nextExample !== classWord.example ||
+        nextPronunciationText !== classWord.pronunciationText ||
         nextAudioUrl !== classWord.audioUrl
       ) {
         classUpdates.push({
           id: classWord.id,
           definition: nextDefinition,
           example: nextExample,
+          pronunciationText: nextPronunciationText,
           audioUrl: nextAudioUrl,
         });
       }
@@ -546,6 +575,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
             data: {
               definition: update.definition,
               example: update.example,
+              pronunciationText: update.pronunciationText,
               audioUrl: update.audioUrl,
             },
           }),
@@ -571,6 +601,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
             data: {
               definition: update.definition,
               example: update.example,
+              pronunciationText: update.pronunciationText,
               audioUrl: update.audioUrl,
             },
           }),
