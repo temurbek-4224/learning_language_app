@@ -1,10 +1,17 @@
 "use server";
 
-import { Prisma, UserRole } from "@prisma/client";
+import {
+  DictionaryLookupStatus,
+  Prisma,
+  UserRole,
+  WordDataSource,
+  WordPartOfSpeech,
+} from "@prisma/client";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth";
+import { lookupDictionary } from "@/lib/dictionary";
 import { prisma } from "@/lib/prisma";
 
 type AiDetailsResult =
@@ -12,10 +19,17 @@ type AiDetailsResult =
       ok: true;
       definition: string;
       example: string;
+      pronunciationText: string | null;
+      audioUrl: string | null;
+      partOfSpeech: WordPartOfSpeech;
+      source: WordDataSource;
+      status: DictionaryLookupStatus;
     }
   | {
       ok: false;
       error: string;
+      source?: WordDataSource;
+      status?: DictionaryLookupStatus;
     };
 
 type BulkAiMode = "SELECTED" | "MISSING_AI";
@@ -30,6 +44,13 @@ type BulkAiResult = {
   successCount: number;
   failedCount: number;
   skippedCount: number;
+  fromCache: number;
+  fromDictionary: number;
+  needsReview: number;
+  needsReviewWords: Array<{
+    id: string;
+    english: string;
+  }>;
   failedWords: Array<{
     id: string;
     english: string;
@@ -37,6 +58,8 @@ type BulkAiResult = {
   }>;
   error?: string;
 };
+
+const BULK_DICTIONARY_BATCH_SIZE = 5;
 
 type GeminiWordDetailsResult =
   | {
@@ -50,10 +73,6 @@ type GeminiWordDetailsResult =
       errorCode: string;
     };
 
-const BULK_AI_DELAY_MS = 2000;
-const GEMINI_RATE_LIMIT_DELAY_MS = 15000;
-const GEMINI_MAX_RETRIES = 1;
-
 function redirectWithError(path: string, error: string) {
   redirect(`${path}?error=${encodeURIComponent(error)}`);
 }
@@ -63,10 +82,27 @@ function cleanOptional(value: FormDataEntryValue | null) {
   return text || null;
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+function parsePartOfSpeech(value: unknown) {
+  const parsed = String(value ?? "AUTO").toUpperCase();
+  return Object.values(WordPartOfSpeech).includes(parsed as WordPartOfSpeech)
+    ? (parsed as WordPartOfSpeech)
+    : WordPartOfSpeech.AUTO;
+}
+
+function parseDataSource(value: unknown) {
+  const parsed = String(value ?? "MANUAL").toUpperCase();
+  return Object.values(WordDataSource).includes(parsed as WordDataSource)
+    ? (parsed as WordDataSource)
+    : WordDataSource.MANUAL;
+}
+
+function parseLookupStatus(value: unknown) {
+  const parsed = String(value ?? "").toUpperCase();
+  return Object.values(DictionaryLookupStatus).includes(
+    parsed as DictionaryLookupStatus,
+  )
+    ? (parsed as DictionaryLookupStatus)
+    : null;
 }
 
 async function requireOwnedDeck(deckId: string) {
@@ -169,6 +205,11 @@ export async function createWordAction(deckId: string, formData: FormData) {
   const translation = String(formData.get("translation") ?? "").trim();
   const definition = cleanOptional(formData.get("definition"));
   const example = cleanOptional(formData.get("example"));
+  const pronunciationText = cleanOptional(formData.get("pronunciationText"));
+  const audioUrl = cleanOptional(formData.get("audioUrl"));
+  const partOfSpeech = parsePartOfSpeech(formData.get("partOfSpeech"));
+  const dataSource = parseDataSource(formData.get("dataSource"));
+  const lookupStatus = parseLookupStatus(formData.get("lookupStatus"));
   const path = `/teacher/decks/${deckId}`;
 
   if (!english || !translation) {
@@ -191,6 +232,11 @@ export async function createWordAction(deckId: string, formData: FormData) {
         translation,
         definition,
         example,
+        pronunciationText,
+        audioUrl,
+        partOfSpeech,
+        dataSource,
+        lookupStatus,
         sortOrder,
       },
     });
@@ -216,6 +262,11 @@ export async function updateWordAction(wordId: string, formData: FormData) {
   const translation = String(formData.get("translation") ?? "").trim();
   const definition = cleanOptional(formData.get("definition"));
   const example = cleanOptional(formData.get("example"));
+  const pronunciationText = cleanOptional(formData.get("pronunciationText"));
+  const audioUrl = cleanOptional(formData.get("audioUrl"));
+  const partOfSpeech = parsePartOfSpeech(formData.get("partOfSpeech"));
+  const dataSource = parseDataSource(formData.get("dataSource"));
+  const lookupStatus = parseLookupStatus(formData.get("lookupStatus"));
   const path = `/teacher/decks/${word.deckId}`;
 
   if (!english || !translation) {
@@ -236,6 +287,11 @@ export async function updateWordAction(wordId: string, formData: FormData) {
         translation,
         definition,
         example,
+        pronunciationText,
+        audioUrl,
+        partOfSpeech,
+        dataSource,
+        lookupStatus,
       },
     });
   } catch (error) {
@@ -505,50 +561,75 @@ The example must include the exact English word "${english}".`;
   }
 }
 
-async function generateWithRetry(word: {
-  term: string;
-  translation: string;
-}) {
-  let lastResult: GeminiWordDetailsResult | null = null;
-
-  for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES; attempt += 1) {
-    const result = await requestGeminiWordDetails(
-      word.term.trim(),
-      word.translation.trim(),
-    );
-
-    if (result.ok) {
-      return result;
-    }
-
-    lastResult = result;
-
-    if (result.errorCode !== "HTTP_429" || attempt >= GEMINI_MAX_RETRIES) {
-      return result;
-    }
-
-    console.warn("Gemini rate limit hit during bulk word details; retrying", {
-      GEMINI_MODEL: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-      errorCode: result.errorCode,
-      message: result.error,
-      retryDelayMs: GEMINI_RATE_LIMIT_DELAY_MS,
-      attempt: attempt + 1,
-    });
-    await sleep(GEMINI_RATE_LIMIT_DELAY_MS);
-  }
-
-  return (
-    lastResult ?? {
-      ok: false as const,
-      error: "AI generation failed. Please try again.",
-      errorCode: "REQUEST_FAILED",
-    }
-  );
-}
-
 export async function generateWordDetailsAction(input: {
   english: string;
+  partOfSpeech?: string;
+  wordId?: string;
+}): Promise<AiDetailsResult> {
+  await requireRole(UserRole.TEACHER, "/teacher/login");
+  const english = input.english.trim();
+
+  if (!english) {
+    return {
+      ok: false,
+      error: "English word is required before dictionary lookup.",
+    };
+  }
+
+  const partOfSpeech = parsePartOfSpeech(input.partOfSpeech);
+  const result = await lookupDictionary({ word: english, partOfSpeech });
+
+  if (input.wordId) {
+    const { word } = await requireOwnedWord(input.wordId);
+    await prisma.deckWord.update({
+      where: { id: word.id },
+      data:
+        result.status === DictionaryLookupStatus.FOUND
+          ? {
+              definition: result.definition,
+              example: result.example,
+              pronunciationText: result.pronunciationText,
+              audioUrl: result.audioUrl,
+              partOfSpeech: result.partOfSpeech,
+              dataSource: result.source,
+              lookupStatus: result.status,
+            }
+          : {
+              dataSource: WordDataSource.DICTIONARY,
+              lookupStatus: result.status,
+            },
+    });
+    revalidatePath(`/teacher/decks/${word.deckId}`);
+  }
+
+  if (result.status !== DictionaryLookupStatus.FOUND || !result.definition) {
+    const needsReview = result.status === DictionaryLookupStatus.NEEDS_REVIEW;
+    return {
+      ok: false,
+      error: needsReview
+        ? "So'z dictionary'dan topilmadi. Qo'lda tekshiring yoki Gemini fallback ishlating."
+        : result.error ?? "Dictionary lookup failed. Please try again.",
+      source: result.source,
+      status: result.status,
+    };
+  }
+
+  return {
+    ok: true,
+    definition: result.definition,
+    example: result.example ?? "",
+    pronunciationText: result.pronunciationText,
+    audioUrl: result.audioUrl,
+    partOfSpeech: result.partOfSpeech,
+    source: result.source,
+    status: result.status,
+  };
+}
+
+export async function generateWordDetailsWithGeminiAction(input: {
+  english: string;
   translation: string;
+  wordId?: string;
 }): Promise<AiDetailsResult> {
   const teacher = await requireRole(UserRole.TEACHER, "/teacher/login");
   const english = input.english.trim();
@@ -557,15 +638,28 @@ export async function generateWordDetailsAction(input: {
   if (!english || !translation) {
     return {
       ok: false,
-      error: "English and translation are required before using AI.",
+      error: "English and translation are required before using Gemini.",
     };
   }
 
   const result = await requestGeminiWordDetails(english, translation);
-
   if (!result.ok) {
     await logAiUsage(teacher.id, false, result.errorCode);
     return { ok: false, error: result.error };
+  }
+
+  if (input.wordId) {
+    const { word } = await requireOwnedWord(input.wordId);
+    await prisma.deckWord.update({
+      where: { id: word.id },
+      data: {
+        definition: result.definition,
+        example: result.example,
+        dataSource: WordDataSource.GEMINI,
+        lookupStatus: DictionaryLookupStatus.FOUND,
+      },
+    });
+    revalidatePath(`/teacher/decks/${word.deckId}`);
   }
 
   await logAiUsage(teacher.id, true);
@@ -573,6 +667,11 @@ export async function generateWordDetailsAction(input: {
     ok: true,
     definition: result.definition,
     example: result.example,
+    pronunciationText: null,
+    audioUrl: null,
+    partOfSpeech: WordPartOfSpeech.AUTO,
+    source: WordDataSource.GEMINI,
+    status: DictionaryLookupStatus.FOUND,
   };
 }
 
@@ -581,8 +680,11 @@ export async function generateBulkWordDetailsAction(input: {
   mode: BulkAiMode;
   wordIds?: string[];
 }): Promise<BulkAiResult> {
-  const { teacher } = await requireOwnedDeck(input.deckId);
-  const uniqueWordIds = Array.from(new Set(input.wordIds ?? []));
+  await requireOwnedDeck(input.deckId);
+  const uniqueWordIds = Array.from(new Set(input.wordIds ?? [])).slice(
+    0,
+    BULK_DICTIONARY_BATCH_SIZE,
+  );
 
   if (input.mode === "SELECTED" && uniqueWordIds.length === 0) {
     return {
@@ -595,6 +697,10 @@ export async function generateBulkWordDetailsAction(input: {
       successCount: 0,
       failedCount: 0,
       skippedCount: 0,
+      fromCache: 0,
+      fromDictionary: 0,
+      needsReview: 0,
+      needsReviewWords: [],
       failedWords: [],
       error: "Select at least one word.",
     };
@@ -611,19 +717,26 @@ export async function generateBulkWordDetailsAction(input: {
         : {}),
     },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    take: BULK_DICTIONARY_BATCH_SIZE,
     select: {
       id: true,
       term: true,
       translation: true,
       definition: true,
       example: true,
+      pronunciationText: true,
+      audioUrl: true,
+      partOfSpeech: true,
     },
   });
 
   let successCount = 0;
   let failedCount = 0;
   let skippedCount = 0;
-  let requestCount = 0;
+  let fromCache = 0;
+  let fromDictionary = 0;
+  let needsReview = 0;
+  const needsReviewWords: BulkAiResult["needsReviewWords"] = [];
   const failedWords: BulkAiResult["failedWords"] = [];
 
   for (const word of words) {
@@ -642,55 +755,79 @@ export async function generateBulkWordDetailsAction(input: {
         english: word.term,
         errorCode: "MISSING_WORD_INPUT",
       });
-      await logAiUsage(
-        teacher.id,
-        false,
-        "MISSING_WORD_INPUT",
-        "BULK_WORD_DETAILS",
-        "DECK_WORD_BULK",
-      );
       continue;
     }
 
-    if (requestCount > 0) {
-      await sleep(BULK_AI_DELAY_MS);
-    }
+    try {
+      const result = await lookupDictionary({
+        word: word.term,
+        partOfSpeech: word.partOfSpeech,
+      });
 
-    requestCount += 1;
-    const result = await generateWithRetry(word);
+      if (result.status === DictionaryLookupStatus.NEEDS_REVIEW) {
+        needsReview += 1;
+        needsReviewWords.push({ id: word.id, english: word.term });
+        await prisma.deckWord.update({
+          where: { id: word.id },
+          data: {
+            dataSource: WordDataSource.DICTIONARY,
+            lookupStatus: DictionaryLookupStatus.NEEDS_REVIEW,
+          },
+        });
+        continue;
+      }
 
-    if (!result.ok) {
+      if (result.status !== DictionaryLookupStatus.FOUND || !result.definition) {
+        failedCount += 1;
+        failedWords.push({
+          id: word.id,
+          english: word.term,
+          errorCode: result.status,
+        });
+        await prisma.deckWord.update({
+          where: { id: word.id },
+          data: {
+            dataSource: WordDataSource.DICTIONARY,
+            lookupStatus: result.status,
+          },
+        });
+        continue;
+      }
+
+      await prisma.deckWord.update({
+        where: { id: word.id },
+        data: {
+          definition: hasDefinition ? word.definition : result.definition,
+          example: hasExample ? word.example : result.example,
+          pronunciationText:
+            word.pronunciationText ?? result.pronunciationText,
+          audioUrl: word.audioUrl ?? result.audioUrl,
+          partOfSpeech:
+            word.partOfSpeech === WordPartOfSpeech.AUTO
+              ? result.partOfSpeech
+              : word.partOfSpeech,
+          dataSource: result.source,
+          lookupStatus: DictionaryLookupStatus.FOUND,
+        },
+      });
+      successCount += 1;
+      if (result.source === WordDataSource.CACHE) {
+        fromCache += 1;
+      } else {
+        fromDictionary += 1;
+      }
+    } catch (error) {
       failedCount += 1;
       failedWords.push({
         id: word.id,
         english: word.term,
-        errorCode: result.errorCode,
+        errorCode: "PROCESSING_ERROR",
       });
-      await logAiUsage(
-        teacher.id,
-        false,
-        result.errorCode,
-        "BULK_WORD_DETAILS",
-        "DECK_WORD_BULK",
-      );
-      continue;
+      console.warn("Dictionary bulk word processing failed", {
+        wordId: word.id,
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
     }
-
-    await prisma.deckWord.update({
-      where: { id: word.id },
-      data: {
-        definition: hasDefinition ? word.definition : result.definition,
-        example: hasExample ? word.example : result.example,
-      },
-    });
-    successCount += 1;
-    await logAiUsage(
-      teacher.id,
-      true,
-      undefined,
-      "BULK_WORD_DETAILS",
-      "DECK_WORD_BULK",
-    );
   }
 
   revalidatePath(`/teacher/decks/${input.deckId}`);
@@ -705,6 +842,10 @@ export async function generateBulkWordDetailsAction(input: {
     successCount,
     failedCount,
     skippedCount,
+    fromCache,
+    fromDictionary,
+    needsReview,
+    needsReviewWords,
     failedWords,
   };
 }

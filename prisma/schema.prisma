@@ -40,6 +40,29 @@ enum ActivityType {
   EXAMPLE
 }
 
+enum WordPartOfSpeech {
+  AUTO
+  NOUN
+  VERB
+  ADJECTIVE
+  ADVERB
+  OTHER
+}
+
+enum WordDataSource {
+  DICTIONARY
+  CACHE
+  GEMINI
+  MANUAL
+}
+
+enum DictionaryLookupStatus {
+  FOUND
+  NOT_FOUND
+  NEEDS_REVIEW
+  ERROR
+}
+
 model WebUser {
   id           String     @id @default(cuid())
   login        String     @unique @map("email")
@@ -136,15 +159,20 @@ model Deck {
 }
 
 model DeckWord {
-  id          String   @id @default(cuid())
-  deckId      String
-  term        String
-  translation String
-  definition  String?
-  example     String?
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String                  @id @default(cuid())
+  deckId            String
+  term              String
+  translation       String
+  definition        String?
+  example           String?
+  pronunciationText String?
+  audioUrl          String?
+  partOfSpeech      WordPartOfSpeech        @default(AUTO)
+  dataSource        WordDataSource          @default(MANUAL)
+  lookupStatus      DictionaryLookupStatus?
+  sortOrder         Int                     @default(0)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
 
   deck                Deck                 @relation(fields: [deckId], references: [id], onDelete: Cascade)
   templateLessonWords TemplateLessonWord[]
@@ -152,6 +180,25 @@ model DeckWord {
 
   @@index([deckId])
   @@unique([deckId, term])
+}
+
+model DictionaryEntryCache {
+  id                String           @id @default(cuid())
+  word              String
+  normalizedWord    String
+  language          String           @default("en")
+  partOfSpeech      WordPartOfSpeech
+  definition        String?
+  example           String?
+  pronunciationText String?
+  audioUrl          String?
+  source            WordDataSource   @default(DICTIONARY)
+  rawJson           Json?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@unique([normalizedWord, language, partOfSpeech])
+  @@index([normalizedWord, language])
 }
 
 model AssignmentTemplate {

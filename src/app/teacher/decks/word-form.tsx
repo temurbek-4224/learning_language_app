@@ -5,7 +5,10 @@ import { Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
-import { generateWordDetailsAction } from "./actions";
+import {
+  generateWordDetailsAction,
+  generateWordDetailsWithGeminiAction,
+} from "./actions";
 
 type WordFormProps = {
   title: string;
@@ -34,18 +37,17 @@ export function WordForm({
   const [aiError, setAiError] = useState("");
   const [isPending, startTransition] = useTransition();
 
-  function fillWithAi() {
+  function fillWithDictionary() {
     setAiError("");
 
-    if (!english.trim() || !translation.trim()) {
-      setAiError("English and translation are required before using AI.");
+    if (!english.trim()) {
+      setAiError("English word is required before dictionary lookup.");
       return;
     }
 
     startTransition(async () => {
       const result = await generateWordDetailsAction({
         english,
-        translation,
       });
 
       if (!result.ok) {
@@ -58,20 +60,31 @@ export function WordForm({
     });
   }
 
+  function fillWithGemini() {
+    setAiError("");
+    startTransition(async () => {
+      const result = await generateWordDetailsWithGeminiAction({ english, translation });
+      if (!result.ok) {
+        setAiError(result.error);
+        return;
+      }
+      setDefinition(result.definition);
+      setExample(result.example);
+    });
+  }
+
   return (
     <form action={action} className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-base font-bold text-slate-950">{title}</h3>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={fillWithAi}
-          disabled={isPending}
-        >
-          <Sparkles />
-          {isPending ? "AI ishlayapti..." : "AI bilan to'ldirish"}
-        </Button>
+        <div className="flex gap-2">
+          <Button type="button" variant="secondary" size="sm" onClick={fillWithDictionary} disabled={isPending}>
+            {isPending ? "Tekshirilmoqda..." : "Dictionary bilan to'ldirish"}
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={fillWithGemini} disabled={isPending}>
+            <Sparkles /> Gemini fallback
+          </Button>
+        </div>
       </div>
 
       {aiError ? (

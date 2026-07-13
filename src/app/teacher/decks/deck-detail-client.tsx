@@ -26,6 +26,7 @@ import {
   deleteWordAction,
   generateBulkWordDetailsAction,
   generateWordDetailsAction,
+  generateWordDetailsWithGeminiAction,
   importWordsAction,
   updateWordAction,
 } from "./actions";
@@ -36,6 +37,11 @@ type DeckWord = {
   translation: string;
   definition: string | null;
   example: string | null;
+  pronunciationText: string | null;
+  audioUrl: string | null;
+  partOfSpeech: WordPartOfSpeech;
+  dataSource: WordDataSource;
+  lookupStatus: LookupStatus;
   createdAt: string;
   updatedAt: string;
 };
@@ -63,7 +69,22 @@ type WordDraft = {
   translation: string;
   definition: string;
   example: string;
+  pronunciationText: string;
+  audioUrl: string;
+  partOfSpeech: WordPartOfSpeech;
+  dataSource: WordDataSource;
+  lookupStatus: LookupStatus;
 };
+
+type WordPartOfSpeech =
+  | "AUTO"
+  | "NOUN"
+  | "VERB"
+  | "ADJECTIVE"
+  | "ADVERB"
+  | "OTHER";
+type WordDataSource = "DICTIONARY" | "CACHE" | "GEMINI" | "MANUAL";
+type LookupStatus = "FOUND" | "NOT_FOUND" | "NEEDS_REVIEW" | "ERROR" | null;
 
 type WordModalState =
   | {
@@ -83,6 +104,13 @@ type BulkResult = {
   successCount: number;
   failedCount: number;
   skippedCount: number;
+  fromCache: number;
+  fromDictionary: number;
+  needsReview: number;
+  needsReviewWords: Array<{
+    id: string;
+    english: string;
+  }>;
   failedWords: Array<{
     id: string;
     english: string;
@@ -91,17 +119,41 @@ type BulkResult = {
   error?: string;
 };
 
-type BulkConfirmState = {
+type BulkProgressState = {
+  phase: "confirm" | "running" | "complete";
   mode: BulkAiMode;
-  count: number;
-  wordIds?: string[];
+  wordIds: string[];
+  completed: number;
+  result: BulkResult;
 };
+
+const BULK_DICTIONARY_LIMIT = 50;
+const BULK_DICTIONARY_BATCH_SIZE = 5;
+
+function createEmptyBulkResult(totalRequested = 0): BulkResult {
+  return {
+    totalRequested,
+    successCount: 0,
+    failedCount: 0,
+    skippedCount: 0,
+    fromCache: 0,
+    fromDictionary: 0,
+    needsReview: 0,
+    needsReviewWords: [],
+    failedWords: [],
+  };
+}
 
 const emptyDraft: WordDraft = {
   english: "",
   translation: "",
   definition: "",
   example: "",
+  pronunciationText: "",
+  audioUrl: "",
+  partOfSpeech: "AUTO",
+  dataSource: "MANUAL",
+  lookupStatus: null,
 };
 
 function formatDate(value: string) {
@@ -115,12 +167,26 @@ function hasAiDetails(word: Pick<DeckWord, "definition" | "example">) {
   return Boolean(word.definition?.trim() && word.example?.trim());
 }
 
+function sourceLabel(source: WordDataSource) {
+  return {
+    DICTIONARY: "Dictionary",
+    CACHE: "Cache",
+    GEMINI: "Gemini",
+    MANUAL: "Manual",
+  }[source];
+}
+
 function createDraft(word?: DeckWord): WordDraft {
   return {
     english: word?.english ?? "",
     translation: word?.translation ?? "",
     definition: word?.definition ?? "",
     example: word?.example ?? "",
+    pronunciationText: word?.pronunciationText ?? "",
+    audioUrl: word?.audioUrl ?? "",
+    partOfSpeech: word?.partOfSpeech ?? "AUTO",
+    dataSource: word?.dataSource ?? "MANUAL",
+    lookupStatus: word?.lookupStatus ?? null,
   };
 }
 
@@ -131,7 +197,10 @@ function isDirty(draft: WordDraft, word?: DeckWord) {
     draft.english !== initial.english ||
     draft.translation !== initial.translation ||
     draft.definition !== initial.definition ||
-    draft.example !== initial.example
+    draft.example !== initial.example ||
+    draft.pronunciationText !== initial.pronunciationText ||
+    draft.audioUrl !== initial.audioUrl ||
+    draft.partOfSpeech !== initial.partOfSpeech
   );
 }
 
@@ -149,8 +218,8 @@ export function DeckDetailClient({
   const [importOpen, setImportOpen] = useState(Boolean(importResult));
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
-  const [bulkConfirm, setBulkConfirm] = useState<BulkConfirmState | null>(null);
-  const [isBulkPending, startBulkTransition] = useTransition();
+  const [bulkProgress, setBulkProgress] = useState<BulkProgressState | null>(null);
+  const [isBulkPending, setIsBulkPending] = useState(false);
 
   const filteredWords = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -179,6 +248,9 @@ export function DeckDetailClient({
     visibleWordIds.length > 0 &&
     visibleWordIds.every((wordId) => selectedIds.has(wordId));
   const missingAiCount = deck.words.filter((word) => !hasAiDetails(word)).length;
+  const missingWordIds = deck.words
+    .filter((word) => !hasAiDetails(word))
+    .map((word) => word.id);
 
   function openCreateModal() {
     setDraft(emptyDraft);
@@ -237,73 +309,133 @@ export function DeckDetailClient({
 
     if (wordIds.length === 0) {
       setBulkResult({
-        totalRequested: 0,
-        successCount: 0,
-        failedCount: 0,
-        skippedCount: 0,
-        failedWords: [],
+        ...createEmptyBulkResult(),
         error: "Select at least one word.",
       });
       return;
     }
 
-    setBulkConfirm({
+    if (wordIds.length > BULK_DICTIONARY_LIMIT) {
+      setBulkResult({
+        ...createEmptyBulkResult(),
+        error: `Bir martada maksimum ${BULK_DICTIONARY_LIMIT} ta so'z tanlang.`,
+      });
+      return;
+    }
+
+    setBulkProgress({
+      phase: "confirm",
       mode: "SELECTED",
-      count: wordIds.length,
       wordIds,
+      completed: 0,
+      result: createEmptyBulkResult(wordIds.length),
     });
   }
 
   function requestMissingBulkAi() {
     if (missingAiCount === 0) {
       setBulkResult({
-        totalRequested: 0,
-        successCount: 0,
-        failedCount: 0,
-        skippedCount: 0,
-        failedWords: [],
-        error: "No missing AI words found.",
+        ...createEmptyBulkResult(),
+        error: "No words with missing details found.",
       });
       return;
     }
 
-    setBulkConfirm({
+    const wordIds = missingWordIds.slice(0, BULK_DICTIONARY_LIMIT);
+    setBulkProgress({
+      phase: "confirm",
       mode: "MISSING_AI",
-      count: missingAiCount,
+      wordIds,
+      completed: 0,
+      result: createEmptyBulkResult(wordIds.length),
     });
   }
 
-  function runBulkAi() {
-    if (!bulkConfirm) {
+  async function runBulkAi() {
+    if (!bulkProgress || bulkProgress.phase !== "confirm") {
       return;
     }
 
-    const payload = bulkConfirm;
+    const payload = bulkProgress;
+    let aggregate = createEmptyBulkResult(payload.wordIds.length);
     setBulkResult(null);
-    setBulkConfirm(null);
+    setIsBulkPending(true);
+    setBulkProgress({ ...payload, phase: "running", completed: 0 });
 
-    startBulkTransition(async () => {
-      const result = await generateBulkWordDetailsAction({
-        deckId: deck.id,
-        mode: payload.mode,
-        wordIds: payload.wordIds,
-      });
+    for (
+      let start = 0;
+      start < payload.wordIds.length;
+      start += BULK_DICTIONARY_BATCH_SIZE
+    ) {
+      const batchIds = payload.wordIds.slice(
+        start,
+        start + BULK_DICTIONARY_BATCH_SIZE,
+      );
 
-      setBulkResult({
-        totalRequested: result.totalRequested,
-        successCount: result.successCount,
-        failedCount: result.failedCount,
-        skippedCount: result.skippedCount,
-        failedWords: result.failedWords,
-        error: result.error,
-      });
+      try {
+        const result = await generateBulkWordDetailsAction({
+          deckId: deck.id,
+          mode: "SELECTED",
+          wordIds: batchIds,
+        });
 
-      if (result.successCount > 0) {
-        setSelectedIds(new Set());
+        if (result.error) {
+          throw new Error(result.error);
+        }
+
+        aggregate = {
+          ...aggregate,
+          successCount: aggregate.successCount + result.successCount,
+          failedCount: aggregate.failedCount + result.failedCount,
+          skippedCount: aggregate.skippedCount + result.skippedCount,
+          fromCache: aggregate.fromCache + result.fromCache,
+          fromDictionary: aggregate.fromDictionary + result.fromDictionary,
+          needsReview: aggregate.needsReview + result.needsReview,
+          needsReviewWords: [
+            ...aggregate.needsReviewWords,
+            ...result.needsReviewWords,
+          ],
+          failedWords: [...aggregate.failedWords, ...result.failedWords],
+        };
+      } catch {
+        const failedBatchWords = batchIds.map((id) => ({
+          id,
+          english: deck.words.find((word) => word.id === id)?.english ?? id,
+          errorCode: "BATCH_ERROR",
+        }));
+        aggregate = {
+          ...aggregate,
+          failedCount: aggregate.failedCount + batchIds.length,
+          failedWords: [...aggregate.failedWords, ...failedBatchWords],
+        };
       }
 
+      const completed = Math.min(
+        start + batchIds.length,
+        payload.wordIds.length,
+      );
+      setBulkProgress({
+        ...payload,
+        phase: "running",
+        completed,
+        result: aggregate,
+      });
       router.refresh();
+    }
+
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      payload.wordIds.forEach((id) => next.delete(id));
+      return next;
     });
+    setBulkResult(aggregate);
+    setBulkProgress({
+      ...payload,
+      phase: "complete",
+      completed: payload.wordIds.length,
+      result: aggregate,
+    });
+    setIsBulkPending(false);
   }
 
   return (
@@ -358,8 +490,8 @@ export function DeckDetailClient({
             <span>Duplicates: {importResult.duplicate}</span>
           </div>
           <p className="mt-3 font-medium">
-            Import tugadi. Endi Missing AI uchun yaratish tugmasi orqali ta'rif
-            va misollarni to'ldiring.
+            Import tugadi. Endi dictionary fill orqali ta'rif va misollarni
+            to'ldiring.
           </p>
         </div>
       ) : null}
@@ -378,16 +510,13 @@ export function DeckDetailClient({
           ) : (
             <div className="space-y-2">
               <p>
-                AI yaratildi: {bulkResult.successCount} ta, xato:{" "}
-                {bulkResult.failedCount} ta, o'tkazildi:{" "}
-                {bulkResult.skippedCount} ta
+                Dictionary: {bulkResult.fromDictionary} ta, cache: {bulkResult.fromCache}
+                ta, tekshirish kerak: {bulkResult.needsReview} ta, xato:{" "}
+                {bulkResult.failedCount} ta, o'tkazildi: {bulkResult.skippedCount} ta
               </p>
-              {bulkResult.failedWords.some(
-                (word) => word.errorCode === "HTTP_429",
-              ) ? (
+              {bulkResult.needsReview > 0 ? (
                 <p className="font-semibold">
-                  Gemini limiti vaqtincha to'ldi. Biroz kutib qayta urinib
-                  ko'ring.
+                  Topilmagan so'zlarni qo'lda tekshiring yoki alohida Gemini fallback ishlating.
                 </p>
               ) : null}
             </div>
@@ -438,10 +567,10 @@ export function DeckDetailClient({
                       All
                     </FilterButton>
                     <FilterButton active={filter === "complete"} onClick={() => setFilter("complete")}>
-                      AI complete
+                      Complete
                     </FilterButton>
                     <FilterButton active={filter === "missing"} onClick={() => setFilter("missing")}>
-                      Missing AI
+                      Missing details
                     </FilterButton>
                   </div>
                 </div>
@@ -463,7 +592,7 @@ export function DeckDetailClient({
                       Selected: {selectedIds.size}
                     </span>
                     <span className="text-sm font-semibold text-slate-600">
-                      Missing AI: {missingAiCount}
+                      Missing details: {missingAiCount}
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -475,8 +604,8 @@ export function DeckDetailClient({
                     >
                       <Sparkles />
                       {isBulkPending
-                        ? "AI yaratilmoqda..."
-                        : "Tanlanganlarga AI yaratish"}
+                        ? "Dictionary tekshirilmoqda..."
+                        : "Tanlanganlarni to'ldirish"}
                     </Button>
                     <Button
                       type="button"
@@ -485,15 +614,15 @@ export function DeckDetailClient({
                     >
                       <Sparkles />
                       {isBulkPending
-                        ? "AI yaratilmoqda..."
-                        : "Missing AI uchun yaratish"}
+                        ? "Dictionary tekshirilmoqda..."
+                        : "Bo'shlarini to'ldirish"}
                     </Button>
                   </div>
                 </div>
 
                 {isBulkPending ? (
                   <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">
-                    AI yaratilmoqda... bu biroz vaqt olishi mumkin
+                    Dictionary tekshirilmoqda... bu biroz vaqt olishi mumkin
                   </div>
                 ) : null}
 
@@ -585,12 +714,15 @@ export function DeckDetailClient({
         />
       ) : null}
 
-      {bulkConfirm ? (
-        <BulkConfirmModal
-          count={bulkConfirm.count}
-          isPending={isBulkPending}
-          onCancel={() => setBulkConfirm(null)}
-          onConfirm={runBulkAi}
+      {bulkProgress ? (
+        <BulkProgressModal
+          progress={bulkProgress}
+          onClose={() => {
+            if (bulkProgress.phase !== "running") {
+              setBulkProgress(null);
+            }
+          }}
+          onConfirm={() => void runBulkAi()}
         />
       ) : null}
     </section>
@@ -684,13 +816,17 @@ function WordRow({
       <span
         className={cn(
           "inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold",
-          complete
+          word.lookupStatus !== "NEEDS_REVIEW" && complete
             ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
             : "bg-amber-50 text-amber-700 ring-1 ring-amber-100",
         )}
       >
         <CheckCircle2 className="size-3.5" />
-        {complete ? "Complete" : "Missing AI"}
+        {word.lookupStatus === "NEEDS_REVIEW"
+          ? "Needs review"
+          : complete
+            ? `${sourceLabel(word.dataSource)} · Found`
+            : `${sourceLabel(word.dataSource)} · Missing`}
       </span>
       <Button type="button" variant="outline" size="sm" className="w-fit" onClick={(event) => {
         event.stopPropagation();
@@ -703,56 +839,185 @@ function WordRow({
   );
 }
 
-function BulkConfirmModal({
-  count,
-  isPending,
-  onCancel,
+function BulkProgressModal({
+  progress,
+  onClose,
   onConfirm,
 }: {
-  count: number;
-  isPending: boolean;
-  onCancel: () => void;
+  progress: BulkProgressState;
+  onClose: () => void;
   onConfirm: () => void;
 }) {
+  const total = progress.wordIds.length;
+  const percentage = total
+    ? Math.round((progress.completed / total) * 100)
+    : 0;
+  const totalBatches = Math.ceil(total / BULK_DICTIONARY_BATCH_SIZE);
+  const completedBatches = Math.ceil(
+    progress.completed / BULK_DICTIONARY_BATCH_SIZE,
+  );
+  const isConfirm = progress.phase === "confirm";
+  const isRunning = progress.phase === "running";
+  const isComplete = progress.phase === "complete";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-3xl border border-white/80 bg-white p-6 shadow-2xl shadow-slate-950/20">
+      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/80 bg-white p-6 shadow-2xl shadow-slate-950/20">
         <div className="flex items-start gap-3">
           <div className="rounded-2xl bg-indigo-50 p-3 text-indigo-600 ring-1 ring-indigo-100">
             <Sparkles className="size-5" />
           </div>
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">
-              Bulk AI
+              Bulk dictionary
             </p>
             <h2 className="mt-1 text-xl font-bold text-slate-950">
-              AI ma'lumot yaratish
+              {isComplete
+                ? "Bulk fill yakunlandi"
+                : "Dictionary ma'lumotlarini to'ldirish"}
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              {count} ta so'z uchun AI ma'lumot yaratiladi. Davom etasizmi?
-              To'liq AI ma'lumotga ega so'zlar o'tkazib yuboriladi.
-            </p>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              Ko'p so'zga AI yaratish biroz vaqt oladi. Limitga tushmaslik
-              uchun so'zlar ketma-ket generatsiya qilinadi.
+              {total} ta so'z {BULK_DICTIONARY_BATCH_SIZE} tadan kichik
+              batchlarda tekshiriladi. Bitta xato qolgan so'zlarni to'xtatmaydi.
             </p>
           </div>
         </div>
+
+        {!isConfirm ? (
+          <div className="mt-6 space-y-3">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-sm font-bold text-slate-950">
+                  {progress.completed} / {total} completed
+                </p>
+                <p className="mt-1 text-xs font-medium text-slate-500">
+                  Batch {Math.min(completedBatches + (isRunning ? 1 : 0), totalBatches)} / {totalBatches}
+                </p>
+              </div>
+              <p className="text-2xl font-black text-indigo-700">{percentage}%</p>
+            </div>
+            <div
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={total}
+              aria-valuenow={progress.completed}
+              className="h-3 overflow-hidden rounded-full bg-slate-100 ring-1 ring-slate-200"
+            >
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-violet-500 to-blue-500 transition-[width] duration-500"
+                style={{ width: `${percentage}%` }}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-medium leading-6 text-indigo-800">
+            Cache birinchi tekshiriladi, keyin FreeDictionaryAPI ishlatiladi.
+            Topilmagan so'zlar Gemini'ga avtomatik yuborilmaydi.
+          </div>
+        )}
+
+        {!isConfirm ? (
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <ProgressStat
+              label="Cache"
+              value={progress.result.fromCache}
+              className="bg-sky-50 text-sky-800 ring-sky-100"
+            />
+            <ProgressStat
+              label="Dictionary"
+              value={progress.result.fromDictionary}
+              className="bg-emerald-50 text-emerald-800 ring-emerald-100"
+            />
+            <ProgressStat
+              label="Needs review"
+              value={progress.result.needsReview}
+              className="bg-amber-50 text-amber-800 ring-amber-100"
+            />
+            <ProgressStat
+              label="Failed"
+              value={progress.result.failedCount}
+              className="bg-rose-50 text-rose-800 ring-rose-100"
+            />
+          </div>
+        ) : null}
+
+        {progress.result.needsReviewWords.length > 0 ? (
+          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm font-bold text-amber-900">
+              Qo'lda tekshirish kerak
+            </p>
+            <div className="mt-3 flex max-h-32 flex-wrap gap-2 overflow-y-auto">
+              {progress.result.needsReviewWords.map((word) => (
+                <span
+                  key={word.id}
+                  className="rounded-full bg-white px-3 py-1 text-xs font-bold text-amber-800 ring-1 ring-amber-200"
+                >
+                  {word.english}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {progress.result.failedWords.length > 0 ? (
+          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+            <p className="text-sm font-bold text-rose-900">Failed</p>
+            <div className="mt-2 max-h-28 space-y-1 overflow-y-auto text-xs font-semibold text-rose-800">
+              {progress.result.failedWords.map((word) => (
+                <p key={word.id}>
+                  {word.english} - {word.errorCode}
+                </p>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {isComplete ? (
+          <p className="mt-5 rounded-2xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 ring-1 ring-slate-200">
+            Summary: {progress.result.fromCache} cache, {progress.result.fromDictionary} dictionary,
+            {" "}{progress.result.needsReview} needs review, {progress.result.failedCount} failed,
+            {" "}{progress.result.skippedCount} skipped.
+          </p>
+        ) : null}
+
         <div className="mt-6 flex justify-end gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onCancel}
-            disabled={isPending}
-          >
-            Cancel
-          </Button>
-          <Button type="button" onClick={onConfirm} disabled={isPending}>
-            <Sparkles />
-            {isPending ? "AI yaratilmoqda..." : "Davom etish"}
-          </Button>
+          {!isRunning ? (
+            <Button type="button" variant="outline" onClick={onClose}>
+              {isComplete ? "Yopish" : "Cancel"}
+            </Button>
+          ) : null}
+          {isConfirm ? (
+            <Button type="button" onClick={onConfirm}>
+              <Sparkles />
+              Boshlash
+            </Button>
+          ) : null}
+          {isRunning ? (
+            <Button type="button" disabled>
+              Dictionary tekshirilmoqda...
+            </Button>
+          ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ProgressStat({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: number;
+  className: string;
+}) {
+  return (
+    <div className={cn("rounded-2xl p-3 ring-1", className)}>
+      <p className="text-xs font-bold uppercase tracking-wide opacity-75">
+        {label}
+      </p>
+      <p className="mt-1 text-2xl font-black">{value}</p>
     </div>
   );
 }
@@ -838,21 +1103,68 @@ function WordModal({
     : createWordAction.bind(null, deckId);
 
   function updateDraft(key: keyof WordDraft, value: string) {
-    onDraftChange({ ...draft, [key]: value });
+    const manuallyEdited =
+      key === "definition" || key === "example" || key === "pronunciationText";
+    onDraftChange({
+      ...draft,
+      [key]: value,
+      ...(manuallyEdited
+        ? { dataSource: "MANUAL" as const, lookupStatus: "FOUND" as const }
+        : {}),
+    });
   }
 
-  function fillWithAi() {
+  function fillWithDictionary() {
     setAiError("");
 
-    if (!draft.english.trim() || !draft.translation.trim()) {
-      setAiError("English and translation are required before using AI.");
+    if (!draft.english.trim()) {
+      setAiError("English word is required before dictionary lookup.");
       return;
     }
 
     startTransition(async () => {
       const result = await generateWordDetailsAction({
         english: draft.english,
+        partOfSpeech: draft.partOfSpeech,
+        wordId: isEdit ? modal.word.id : undefined,
+      });
+
+      if (!result.ok) {
+        setAiError(result.status === "NEEDS_REVIEW" ? "" : result.error);
+        onDraftChange({
+          ...draft,
+          dataSource: result.source ?? "DICTIONARY",
+          lookupStatus: result.status ?? "ERROR",
+        });
+        return;
+      }
+
+      onDraftChange({
+        ...draft,
+        definition: result.definition,
+        example: result.example,
+        pronunciationText: result.pronunciationText ?? "",
+        audioUrl: result.audioUrl ?? "",
+        partOfSpeech: result.partOfSpeech,
+        dataSource: result.source,
+        lookupStatus: result.status,
+      });
+    });
+  }
+
+  function fillWithGemini() {
+    setAiError("");
+
+    if (!draft.english.trim() || !draft.translation.trim()) {
+      setAiError("English and translation are required before using Gemini.");
+      return;
+    }
+
+    startTransition(async () => {
+      const result = await generateWordDetailsWithGeminiAction({
+        english: draft.english,
         translation: draft.translation,
+        wordId: isEdit ? modal.word.id : undefined,
       });
 
       if (!result.ok) {
@@ -864,6 +1176,8 @@ function WordModal({
         ...draft,
         definition: result.definition,
         example: result.example,
+        dataSource: "GEMINI",
+        lookupStatus: "FOUND",
       });
     });
   }
@@ -886,9 +1200,18 @@ function WordModal({
         </div>
 
         <form action={action} className="space-y-5 p-6">
+          <input type="hidden" name="dataSource" value={draft.dataSource} />
+          <input type="hidden" name="lookupStatus" value={draft.lookupStatus ?? ""} />
+          <input type="hidden" name="audioUrl" value={draft.audioUrl} />
           {aiError ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
               {aiError}
+            </div>
+          ) : null}
+
+          {draft.lookupStatus === "NEEDS_REVIEW" ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              So'z dictionary'dan topilmadi. Qo'lda tekshiring yoki Gemini fallback ishlating.
             </div>
           ) : null}
 
@@ -917,15 +1240,41 @@ function WordModal({
             </label>
           </div>
 
-          <div className="flex justify-end">
+          <label className="block space-y-2">
+            <span className="text-sm font-bold text-slate-700">Part of speech</span>
+            <select
+              name="partOfSpeech"
+              value={draft.partOfSpeech}
+              onChange={(event) => updateDraft("partOfSpeech", event.target.value)}
+              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none ring-indigo-100 transition focus:border-indigo-400 focus:bg-white focus:ring-4"
+            >
+              <option value="AUTO">Auto</option>
+              <option value="NOUN">Noun</option>
+              <option value="VERB">Verb</option>
+              <option value="ADJECTIVE">Adjective</option>
+              <option value="ADVERB">Adverb</option>
+              <option value="OTHER">Other</option>
+            </select>
+          </label>
+
+          <div className="flex flex-wrap justify-end gap-2">
             <Button
               type="button"
               variant="secondary"
-              onClick={fillWithAi}
+              onClick={fillWithDictionary}
+              disabled={isPending}
+            >
+              <BookOpen />
+              {isPending ? "Tekshirilmoqda..." : "Dictionary bilan to'ldirish"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={fillWithGemini}
               disabled={isPending}
             >
               <Sparkles />
-              {isPending ? "AI ishlayapti..." : "AI bilan to'ldirish"}
+              Gemini fallback
             </Button>
           </div>
 
@@ -949,6 +1298,21 @@ function WordModal({
               rows={3}
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none ring-indigo-100 transition focus:border-indigo-400 focus:bg-white focus:ring-4"
             />
+          </label>
+
+          <label className="block space-y-2">
+            <span className="text-sm font-bold text-slate-700">Pronunciation</span>
+            <input
+              name="pronunciationText"
+              value={draft.pronunciationText}
+              onChange={(event) => updateDraft("pronunciationText", event.target.value)}
+              placeholder="IPA pronunciation, when available"
+              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none ring-indigo-100 transition focus:border-indigo-400 focus:bg-white focus:ring-4"
+            />
+            <span className="text-xs font-medium text-slate-500">
+              Source: {sourceLabel(draft.dataSource)}
+              {draft.lookupStatus ? ` · ${draft.lookupStatus.replaceAll("_", " ")}` : ""}
+            </span>
           </label>
 
           <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
