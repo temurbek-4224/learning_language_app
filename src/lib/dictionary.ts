@@ -193,20 +193,44 @@ function normalizeAudioUrl(value: unknown) {
   return audioUrl.startsWith("//") ? `https:${audioUrl}` : audioUrl;
 }
 
+function audioDialectPriority(audioUrl: string) {
+  const normalized = audioUrl.toLowerCase();
+  if (/(?:^|[-_/])(us|american)(?:[-_.?/]|$)/.test(normalized)) {
+    return 0;
+  }
+  if (/(?:^|[-_/])(uk|gb|british)(?:[-_.?/]|$)/.test(normalized)) {
+    return 1;
+  }
+  return 2;
+}
+
 function getDictionaryApiPronunciation(entry: ApiEntry) {
   const phonetics = Array.isArray(entry.phonetics)
     ? (entry.phonetics as ApiPronunciation[])
     : [];
+  const preferredAudio = phonetics
+    .map((item, index) => ({
+      item,
+      index,
+      audioUrl: normalizeAudioUrl(item.audio),
+    }))
+    .filter(
+      (candidate): candidate is typeof candidate & { audioUrl: string } =>
+        Boolean(candidate.audioUrl),
+    )
+    .sort(
+      (left, right) =>
+        audioDialectPriority(left.audioUrl) -
+          audioDialectPriority(right.audioUrl) || left.index - right.index,
+    )[0];
   const pronunciationText =
+    cleanString(preferredAudio?.item.text) ??
     phonetics.map((item) => cleanString(item.text)).find(Boolean) ??
     cleanString(entry.phonetic);
-  const audioUrl = phonetics
-    .map((item) => normalizeAudioUrl(item.audio))
-    .find(Boolean);
 
   return {
     pronunciationText: pronunciationText ?? null,
-    audioUrl: audioUrl ?? null,
+    audioUrl: preferredAudio?.audioUrl ?? null,
   };
 }
 

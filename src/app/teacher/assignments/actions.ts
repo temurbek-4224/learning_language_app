@@ -114,6 +114,7 @@ export async function createAssignmentTemplateAction(formData: FormData) {
           translation: true,
           definition: true,
           example: true,
+          audioUrl: true,
         },
       },
     },
@@ -161,6 +162,7 @@ export async function createAssignmentTemplateAction(formData: FormData) {
             translation: word.translation,
             definition: word.definition ?? "",
             example: word.example,
+            audioUrl: word.audioUrl,
             sortOrder: wordIndex,
           })),
         });
@@ -291,6 +293,7 @@ export async function assignTemplateToClassesAction(
               translation: word.translation,
               definition: word.definition,
               example: word.example,
+              audioUrl: word.audioUrl,
               sortOrder: word.sortOrder,
             })),
           });
@@ -379,6 +382,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
       translation: true,
       definition: true,
       example: true,
+      audioUrl: true,
     },
   });
   const sourceById = new Map(sourceWords.map((word) => [word.id, word]));
@@ -392,12 +396,13 @@ export async function syncAssignmentAiSnapshotsAction(input: {
   let failedCount = 0;
   const desiredByTemplateWordId = new Map<
     string,
-    { definition: string; example: string | null }
+    { definition: string; example: string | null; audioUrl: string | null }
   >();
   const templateUpdates: Array<{
     id: string;
     definition: string;
     example: string | null;
+    audioUrl: string | null;
   }> = [];
 
   for (const lesson of template.lessons) {
@@ -406,11 +411,17 @@ export async function syncAssignmentAiSnapshotsAction(input: {
         (word.deckWordId ? sourceById.get(word.deckWordId) : undefined) ??
         sourceByText.get(wordKey(word.term, word.translation));
 
-      if (!source || (!hasText(source.definition) && !hasText(source.example))) {
+      if (
+        !source ||
+        (!hasText(source.definition) &&
+          !hasText(source.example) &&
+          !hasText(source.audioUrl))
+      ) {
         noSourceAiCount += 1;
         desiredByTemplateWordId.set(word.id, {
           definition: word.definition,
           example: word.example,
+          audioUrl: word.audioUrl,
         });
         continue;
       }
@@ -424,12 +435,20 @@ export async function syncAssignmentAiSnapshotsAction(input: {
         hasText(source.example) && (overwriteExisting || !hasText(word.example))
           ? source.example?.trim() ?? word.example
           : word.example;
+      const nextAudioUrl =
+        hasText(source.audioUrl) &&
+        (overwriteExisting || !hasText(word.audioUrl))
+          ? source.audioUrl?.trim() ?? word.audioUrl
+          : word.audioUrl;
       const templateChanged =
-        nextDefinition !== word.definition || nextExample !== word.example;
+        nextDefinition !== word.definition ||
+        nextExample !== word.example ||
+        nextAudioUrl !== word.audioUrl;
 
       desiredByTemplateWordId.set(word.id, {
         definition: nextDefinition,
         example: nextExample,
+        audioUrl: nextAudioUrl,
       });
 
       if (templateChanged) {
@@ -437,6 +456,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
           id: word.id,
           definition: nextDefinition,
           example: nextExample,
+          audioUrl: nextAudioUrl,
         });
       } else {
         skippedCount += 1;
@@ -449,6 +469,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
     id: string;
     definition: string;
     example: string | null;
+    audioUrl: string | null;
   }> = [];
 
   if (templateWordIds.length > 0) {
@@ -471,6 +492,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
         templateLessonWordId: true,
         definition: true,
         example: true,
+        audioUrl: true,
       },
     });
 
@@ -494,15 +516,22 @@ export async function syncAssignmentAiSnapshotsAction(input: {
         hasText(desired.example) && (overwriteExisting || !hasText(classWord.example))
           ? desired.example
           : classWord.example;
+      const nextAudioUrl =
+        hasText(desired.audioUrl) &&
+        (overwriteExisting || !hasText(classWord.audioUrl))
+          ? desired.audioUrl
+          : classWord.audioUrl;
 
       if (
         nextDefinition !== classWord.definition ||
-        nextExample !== classWord.example
+        nextExample !== classWord.example ||
+        nextAudioUrl !== classWord.audioUrl
       ) {
         classUpdates.push({
           id: classWord.id,
           definition: nextDefinition,
           example: nextExample,
+          audioUrl: nextAudioUrl,
         });
       }
     }
@@ -517,6 +546,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
             data: {
               definition: update.definition,
               example: update.example,
+              audioUrl: update.audioUrl,
             },
           }),
         ),
@@ -541,6 +571,7 @@ export async function syncAssignmentAiSnapshotsAction(input: {
             data: {
               definition: update.definition,
               example: update.example,
+              audioUrl: update.audioUrl,
             },
           }),
         ),
