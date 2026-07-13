@@ -11,7 +11,11 @@ import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth";
-import { lookupDictionary } from "@/lib/dictionary";
+import {
+  getDictionaryCandidates,
+  lookupDictionary,
+  type DictionaryCandidate,
+} from "@/lib/dictionary";
 import { prisma } from "@/lib/prisma";
 
 type AiDetailsResult =
@@ -60,6 +64,9 @@ type BulkAiResult = {
 };
 
 const BULK_DICTIONARY_BATCH_SIZE = 5;
+const DECK_WORD_LIMIT = 50;
+const DECK_WORD_LIMIT_ERROR =
+  "Bitta deck maksimum 50 ta so‘zdan iborat bo‘lishi mumkin.";
 
 type GeminiWordDetailsResult =
   | {
@@ -216,13 +223,18 @@ export async function createWordAction(deckId: string, formData: FormData) {
     redirectWithError(path, "English and translation are required.");
   }
 
+  const wordCount = await prisma.deckWord.count({ where: { deckId } });
+  if (wordCount >= DECK_WORD_LIMIT) {
+    redirectWithError(path, DECK_WORD_LIMIT_ERROR);
+  }
+
   const duplicate = await findDuplicateTerm(deckId, english);
 
   if (duplicate) {
     redirectWithError(path, "This English word already exists in this deck.");
   }
 
-  const sortOrder = await prisma.deckWord.count({ where: { deckId } });
+  const sortOrder = wordCount;
 
   try {
     await prisma.deckWord.create({
@@ -353,9 +365,19 @@ export async function importWordsAction(deckId: string, formData: FormData) {
   let imported = 0;
   let skipped = 0;
   let duplicate = 0;
+  let limitReached = false;
   const seen = new Set<string>();
+  const existingWordCount = await prisma.deckWord.count({ where: { deckId } });
+
+  if (existingWordCount >= DECK_WORD_LIMIT) {
+    redirectWithError(path, DECK_WORD_LIMIT_ERROR);
+  }
 
   for (const line of lines) {
+    if (existingWordCount + imported >= DECK_WORD_LIMIT) {
+      limitReached = true;
+      break;
+    }
     const parsed = parseImportLine(line);
 
     if (!parsed) {
@@ -389,7 +411,7 @@ export async function importWordsAction(deckId: string, formData: FormData) {
           translation: parsed.translation,
           definition: null,
           example: null,
-          sortOrder: await prisma.deckWord.count({ where: { deckId } }),
+          sortOrder: existingWordCount + imported,
         },
       });
       imported += 1;
@@ -407,7 +429,15 @@ export async function importWordsAction(deckId: string, formData: FormData) {
   }
 
   revalidatePath(path);
-  redirect(`${path}?imported=${imported}&skipped=${skipped}&duplicate=${duplicate}`);
+  const query = new URLSearchParams({
+    imported: String(imported),
+    skipped: String(skipped),
+    duplicate: String(duplicate),
+  });
+  if (limitReached) {
+    query.set("error", DECK_WORD_LIMIT_ERROR);
+  }
+  redirect(`${path}?${query.toString()}`);
 }
 
 function stripCodeFences(text: string) {
@@ -584,7 +614,7 @@ export async function generateWordDetailsAction(input: {
     await prisma.deckWord.update({
       where: { id: word.id },
       data:
-        result.status === DictionaryLookupStatus.FOUND
+        result.definition
           ? {
               definition: result.definition,
               example: result.example,
@@ -602,7 +632,7 @@ export async function generateWordDetailsAction(input: {
     revalidatePath(`/teacher/decks/${word.deckId}`);
   }
 
-  if (result.status !== DictionaryLookupStatus.FOUND || !result.definition) {
+  if (!result.definition) {
     const needsReview = result.status === DictionaryLookupStatus.NEEDS_REVIEW;
     return {
       ok: false,
@@ -623,6 +653,79 @@ export async function generateWordDetailsAction(input: {
     partOfSpeech: result.partOfSpeech,
     source: result.source,
     status: result.status,
+  };
+}
+
+export async function getDictionaryMeaningCandidatesAction(input: {
+  wordId: string;
+  bypassCache?: boolean;
+}) {
+  const { word } = await requireOwnedWord(input.wordId);
+  const result = await getDictionaryCandidates({
+    word: word.term,
+    partOfSpeech: word.partOfSpeech,
+    bypassCache: input.bypassCache,
+  });
+
+  return {
+    ok: result.candidates.length > 0,
+    candidates: result.candidates,
+    source: result.source,
+    status: result.status,
+    error:
+      result.error ??
+      (result.candidates.length === 0
+        ? "So'z dictionary'dan topilmadi."
+        : undefined),
+  };
+}
+
+export async function selectDictionaryMeaningAction(input: {
+  wordId: string;
+  candidate: DictionaryCandidate;
+  source: "CACHE" | "DICTIONARY";
+}) {
+  const { word } = await requireOwnedWord(input.wordId);
+  const definition = String(input.candidate.definition ?? "").trim();
+  const example = String(input.candidate.example ?? "").trim() || null;
+  const pronunciationText =
+    String(input.candidate.pronunciationText ?? "").trim() || null;
+  const audioUrl = String(input.candidate.audioUrl ?? "").trim() || null;
+  const partOfSpeech = parsePartOfSpeech(input.candidate.partOfSpeech);
+
+  if (!definition) {
+    return { ok: false as const, error: "Definition is required." };
+  }
+
+  const dataSource =
+    input.source === "CACHE" ? WordDataSource.CACHE : WordDataSource.DICTIONARY;
+  const lookupStatus = example
+    ? DictionaryLookupStatus.FOUND
+    : DictionaryLookupStatus.NEEDS_REVIEW;
+
+  await prisma.deckWord.update({
+    where: { id: word.id },
+    data: {
+      definition,
+      example,
+      pronunciationText,
+      audioUrl,
+      partOfSpeech,
+      dataSource,
+      lookupStatus,
+    },
+  });
+  revalidatePath(`/teacher/decks/${word.deckId}`);
+
+  return {
+    ok: true as const,
+    definition,
+    example: example ?? "",
+    pronunciationText,
+    audioUrl,
+    partOfSpeech,
+    source: dataSource,
+    status: lookupStatus,
   };
 }
 
@@ -739,7 +842,17 @@ export async function generateBulkWordDetailsAction(input: {
   const needsReviewWords: BulkAiResult["needsReviewWords"] = [];
   const failedWords: BulkAiResult["failedWords"] = [];
 
-  for (const word of words) {
+  let nextWordIndex = 0;
+
+  async function processNextWords() {
+    while (nextWordIndex < words.length) {
+      const word = words[nextWordIndex];
+      nextWordIndex += 1;
+
+      if (!word) {
+        continue;
+      }
+
     const hasDefinition = Boolean(word.definition?.trim());
     const hasExample = Boolean(word.example?.trim());
 
@@ -770,7 +883,16 @@ export async function generateBulkWordDetailsAction(input: {
         await prisma.deckWord.update({
           where: { id: word.id },
           data: {
-            dataSource: WordDataSource.DICTIONARY,
+            definition: result.definition ?? word.definition,
+            example: hasExample ? word.example : result.example,
+            pronunciationText:
+              word.pronunciationText ?? result.pronunciationText,
+            audioUrl: word.audioUrl ?? result.audioUrl,
+            partOfSpeech:
+              word.partOfSpeech === WordPartOfSpeech.AUTO
+                ? result.partOfSpeech
+                : word.partOfSpeech,
+            dataSource: result.source,
             lookupStatus: DictionaryLookupStatus.NEEDS_REVIEW,
           },
         });
@@ -828,7 +950,10 @@ export async function generateBulkWordDetailsAction(input: {
         message: error instanceof Error ? error.message : "Unknown error",
       });
     }
+    }
   }
+
+  await Promise.all([processNextWords(), processNextWords()]);
 
   revalidatePath(`/teacher/decks/${input.deckId}`);
 

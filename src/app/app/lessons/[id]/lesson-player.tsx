@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -13,10 +13,12 @@ import {
   RotateCcw,
   Sparkles,
   Trophy,
+  Volume2,
   XCircle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { playWordAudio } from "@/lib/word-audio";
 import { completeLesson } from "./actions";
 
 type LessonWord = {
@@ -25,6 +27,7 @@ type LessonWord = {
   translation: string;
   definition: string | null;
   example: string | null;
+  audioUrl: string | null;
 };
 
 type LessonPlayerProps = {
@@ -406,6 +409,11 @@ function StudyStep({
   onNext: () => void;
   onStartQuiz: () => void;
 }) {
+  useEffect(
+    () => playWordAudio({ term: word.term, audioUrl: word.audioUrl }),
+    [word.audioUrl, word.term],
+  );
+
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-300">
       <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200">
@@ -416,7 +424,19 @@ function StudyStep({
               {currentIndex + 1} / {wordsCount}
             </span>
           </div>
-          <p className="mt-8 text-4xl font-black text-slate-950">{word.term}</p>
+          <div className="mt-8 flex items-center justify-center gap-3">
+            <p className="text-4xl font-black text-slate-950">{word.term}</p>
+            <button
+              type="button"
+              onClick={() =>
+                playWordAudio({ term: word.term, audioUrl: word.audioUrl })
+              }
+              className="inline-flex size-11 items-center justify-center rounded-full bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-100 transition hover:bg-indigo-50"
+              aria-label={`Play pronunciation for ${word.term}`}
+            >
+              <Volume2 className="size-5" />
+            </button>
+          </div>
           <p className="mt-3 text-2xl font-extrabold text-indigo-700">
             {word.translation}
           </p>

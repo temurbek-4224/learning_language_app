@@ -60,6 +60,9 @@ export default async function StudentLessonPage({
           translation: true,
           definition: true,
           example: true,
+          deckWord: {
+            select: { audioUrl: true },
+          },
         },
       },
     },
@@ -180,7 +183,14 @@ export default async function StudentLessonPage({
       assignmentId={lesson.assignment.id}
       title={lesson.title}
       classTitle={lesson.assignment.classRoom.title}
-      words={playerWords}
+      words={playerWords.map((word) => ({
+        id: word.id,
+        term: word.term,
+        translation: word.translation,
+        definition: word.definition,
+        example: word.example,
+        audioUrl: word.deckWord?.audioUrl ?? null,
+      }))}
     />
   );
 }
